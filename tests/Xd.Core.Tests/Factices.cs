@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rotomeca.Core.Optionals;
 using Rotomeca.Rop;
 using Rotomeca.Rop.Interfaces;
 using Xd.Core.Audit;
@@ -56,6 +57,9 @@ internal sealed class ActionFactice : IActionPreparee
 
     public string Reformulation { get; }
     public int NombreExecutions { get; private set; }
+    public bool ConfirmationRequise { get; init; }
+    public string MessageSiRefus { get; init; } = "L'utilisateur a refusé l'action.";
+    public IReadOnlyList<string> ElementsACiter { get; init; } = [];
 
     public Task<IResult<string>> ExecuterAsync(CancellationToken annulation)
     {
@@ -66,13 +70,17 @@ internal sealed class ActionFactice : IActionPreparee
 
 internal sealed class ConfirmateurFactice : IConfirmateur
 {
-    private readonly Func<CancellationToken, Task<bool>> _repondre;
+    private readonly Func<CancellationToken, Task<MayBe<string>>> _repondre;
 
-    public ConfirmateurFactice(bool reponse) : this(_ => Task.FromResult(reponse))
+    public ConfirmateurFactice(bool reponse) : this(reponse ? "oui" : "non")
     {
     }
 
-    public ConfirmateurFactice(Func<CancellationToken, Task<bool>> repondre)
+    public ConfirmateurFactice(string reponse) : this(_ => Task.FromResult<MayBe<string>>(reponse))
+    {
+    }
+
+    public ConfirmateurFactice(Func<CancellationToken, Task<MayBe<string>>> repondre)
     {
         _repondre = repondre;
     }
@@ -84,12 +92,12 @@ internal sealed class ConfirmateurFactice : IConfirmateur
         new(async annulation =>
         {
             await Task.Delay(Timeout.Infinite, annulation);
-            return true;
+            return "oui";
         });
 
-    public Task<bool> ConfirmerAsync(string reformulation, CancellationToken annulation)
+    public Task<MayBe<string>> PoserQuestionAsync(string question, CancellationToken annulation)
     {
-        Questions.Add(reformulation);
+        Questions.Add(question);
         return _repondre(annulation);
     }
 }

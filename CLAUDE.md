@@ -16,7 +16,7 @@ Plateforme cible : **Windows et Linux**. Tout code spécifique à l'OS (icône d
 
 Solution `Xd.slnx` (format XML, SDK .NET 10). Paramètres communs (`net10.0`, `Nullable`, `ImplicitUsings`, `TreatWarningsAsErrors`) dans `Directory.Build.props` : ne pas les répéter dans les `.csproj`.
 
-Existant : `src/Xd.Core` (abstractions d'outils, couche de permission `ExecuteurOutils`, journal d'audit JSONL, boucle agentique `BoucleAgentique` + historique glissant), `src/Xd.Local` (adaptateur `IModele` vers `llama-server`, lancement de `llama-server` en processus enfant, configuration `llm.json`, installation `xd setup llm`), `src/Xd.Tools` (outils `etat_machine`, `noter_idee`, `configurer_notes` ; configuration des notes `notes.json`), `src/Xd.Cli` (exécutable `xd` : discussion en console, `xd setup llm`), `src/Xd.Claude` (adaptateur `IModele` sur le SDK `Anthropic`, **mis de côté** : conservé et testé, mais non utilisé) et leurs tests xUnit. Prochaines tranches : `lancer_mode`, puis veille/éveil et le choix automatique du palier à l'éveil.
+Existant : `src/Xd.Core` (abstractions d'outils, couche de permission `ExecuteurOutils`, journal d'audit JSONL, boucle agentique `BoucleAgentique` + historique glissant), `src/Xd.Local` (adaptateur `IModele` vers `llama-server`, lancement de `llama-server` en processus enfant, configuration `llm.json`, installation `xd setup llm`), `src/Xd.Tools` (outils `etat_machine`, `noter_idee`, `configurer_notes`, `consulter_notes` ; configuration des notes `notes.json`), `src/Xd.Cli` (exécutable `xd` : discussion en console, `xd setup llm`), `src/Xd.Claude` (adaptateur `IModele` sur le SDK `Anthropic`, **mis de côté** : conservé et testé, mais non utilisé) et leurs tests xUnit. Prochaines tranches : `lancer_mode`, puis veille/éveil et le choix automatique du palier à l'éveil.
 
 ```sh
 dotnet build Xd.slnx
@@ -57,7 +57,7 @@ Phrases de bonjour/au revoir : liste locale variée selon l'heure de la journée
 
 Trois blocs, découplés par interfaces :
 
-- **Entrée/sortie** : flux de phrases utilisateur → orchestrateur → flux de réponses à dire. À l'étape 1 c'est la console ; à l'étape 2 ce sera le service audio. Rien dans la boucle ne doit dépendre de la console.
+- **Entrée/sortie** : flux de phrases utilisateur → orchestrateur → flux de réponses à dire. À l'étape 1 c'est la console ; à l'étape 2 ce sera le service audio. Rien dans la boucle ne doit dépendre de la console. **Texte et voix coexistent** : toute vérification sur les paroles de l'utilisateur doit tolérer une transcription vocale (casse, accents, ponctuation, espaces ignorés ; « x d » vaut « Xd »), et toute saisie qui se dicte mal (chemin) doit avoir un raccourci dictable. Pas de chemin lu à voix haute sans demande.
 - **Boucle agentique** : envoie l'historique + la liste des outils au modèle (`IModele`), traite les `tool_use`, renvoie les `tool_result`, relance jusqu'à une réponse texte.
 - **Outils + couche de permission** : chaque outil expose un nom, une description, un schéma JSON de paramètres, un **niveau** (`Libre` ou `Confirme`) et une méthode d'exécution.
 
@@ -90,12 +90,16 @@ Le modèle ne voit que les noms d'outils, descriptions et schémas ; les message
 
 | Outil | Niveau | Paramètres | Comportement |
 |---|---|---|---|
-| `noter_idee` | Libre | `texte`, `destination` (énumération : `general` + sous-dossiers des dossiers de projets configurés) | La destination doit être **citée dans la phrase de l'utilisateur**, sinon refus et le modèle demande (il ne choisit jamais à sa place). Ajoute une ligne horodatée à la fin de `general.md` ou de `projets/<projet>.md`, dans le dossier de notes configuré. **Ajout uniquement**, jamais de réécriture ni de suppression. Dossier non configuré ou disparu : erreur qui pousse le modèle à demander à l'utilisateur. |
-| `configurer_notes` | Confirmé | `element` : `dossier_notes`, `dossier_projets` (aucun chemin) | Lit le chemin dans la phrase de l'utilisateur (invariant 5), le valide (complet, sans `..`, ni racine, ni dossier système) et l'écrit dans `notes.json` après confirmation du chemin exact. |
+| `noter_idee` | Libre | `texte`, `destination` (`general`, un carnet existant, ou un nouveau carnet) | Ajoute une ligne horodatée à la fin de `general.md` ou de `projets/<carnet>.md` dans le dossier de notes. **Ajout uniquement**, jamais de réécriture ni de suppression. Carnet existant non cité par l'utilisateur → confirmation ; nouveau carnet → nom obligatoirement tiré de ses paroles, validé comme nom de fichier, et création toujours confirmée. |
+| `configurer_notes` | Confirmé | aucun | Lit le dossier de notes dans les paroles de l'utilisateur (invariant 5 ; raccourcis dictables « dans mes documents, dossier X », « par défaut »), le valide (complet, sans `..`, ni racine, ni dossier système) et l'écrit dans `notes.json` après confirmation du chemin exact. |
+| `consulter_notes` | Libre | `quoi` : `emplacement`, `carnets`, `dernieres_notes` (+ `carnet`) | Lecture seule : où sont les notes, quels carnets existent, les 5 dernières notes d'un carnet. |
 | `lancer_mode` | Confirmé | `mode` (énumération issue de la config) | Lance la liste de programmes + arguments définie pour ce mode dans la config. Le modèle ne voit jamais les commandes, seulement les noms de modes. |
 | `etat_machine` | Libre | `aspect` : `cpu`, `ram`, `disque`, `conteneurs` | Lit les métriques via les API de la plateforme (sans shell), renvoie un résumé court. Implémentation spécifique à l'OS derrière une interface. |
 
-Pour un outil `Confirme`, l'assistant reformule l'action concrète (« Je lance le mode jeu : Unity sur le projet X et Discord. Je confirme ? ») et attend un oui explicite.
+**Confirmations** (outil `Confirme`, ou action qui l'exige via `IActionPreparee.ConfirmationRequise`, ex. destination de note non citée par l'utilisateur ; une action peut ajouter une confirmation, jamais en retirer) :
+
+- La question : le modèle peut la rédiger (paramètre `question_confirmation`, ajouté à chaque schéma par `ExecuteurOutils`) ; elle n'est affichée que si elle cite tous les `ElementsACiter` de l'action vérifiée, sinon la `Reformulation` de l'orchestrateur la remplace. Le modèle ne peut pas faire confirmer une chose en en montrant une autre.
+- La réponse : `IConfirmateur` ne fait que la rapporter ; `ExecuteurOutils` l'interprète avec `InterpretationConfirmation` (déterministe, **jamais le modèle**) : oui franc → exécution ; non franc → refus avec `MessageSiRefus` ; toute autre réponse (« oui mais dans Xd ») → refus, et la réponse est rendue au modèle comme nouvelle consigne et ajoutée aux paroles de l'utilisateur (`ContexteAppel.Paroles`) pour la suite de la demande.
 
 ## Interventions spontanées (étape 4, pour mémoire)
 

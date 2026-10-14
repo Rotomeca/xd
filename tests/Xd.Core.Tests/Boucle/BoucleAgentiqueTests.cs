@@ -1,3 +1,4 @@
+using Rotomeca.Core.Optionals;
 using Rotomeca.Rop;
 using Rotomeca.Rop.Interfaces;
 using Xd.Core.Audit;
@@ -75,6 +76,23 @@ public sealed class BoucleAgentiqueTests
         Assert.Equal(0, action.NombreExecutions);
         MessageResultatsOutils resultats = Assert.IsType<MessageResultatsOutils>(modele.Envois[1][^1]);
         Assert.True(Assert.Single(resultats.Resultats).EstErreur);
+    }
+
+    [Fact]
+    public async Task ReponseLibreALaConfirmation_ComptePourLesAppelsSuivantsDuTour()
+    {
+        var modele = Script(Appels(Appel("a1", "noter_idee")), Appels(Appel("a2", "noter_idee")), Texte("C'est noté dans Xd."));
+        var outil = new OutilFactice("noter_idee", NiveauOutil.Libre, new ActionFactice("Je note dans les générales ?", "Noté.") { ConfirmationRequise = true });
+        var reponses = new Queue<string>(["oui mais dans Xd", "oui"]);
+        var confirmateur = new ConfirmateurFactice(_ => Task.FromResult<MayBe<string>>(reponses.Dequeue()));
+
+        string reponse = await Boucle(modele, confirmateur, outil).TraiterAsync("note que je dois faire un gratin", CancellationToken.None);
+
+        Assert.Equal("C'est noté dans Xd.", reponse);
+        Assert.Equal(["note que je dois faire un gratin"], outil.Contextes[0].Paroles);
+        Assert.Equal(["note que je dois faire un gratin", "oui mais dans Xd"], outil.Contextes[1].Paroles);
+        MessageResultatsOutils premier = Assert.IsType<MessageResultatsOutils>(modele.Envois[1][^1]);
+        Assert.Contains("« oui mais dans Xd »", premier.Resultats[0].Contenu);
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rotomeca.Core.Optionals;
 using Rotomeca.Rop;
 using Rotomeca.Rop.Interfaces;
 using Xd.Core.Audit;
@@ -209,6 +210,141 @@ public sealed class ExecuteurOutilsTests
     }
 
     [Fact]
+    public async Task OutilLibreDontLActionExigeUneConfirmation_EstConfirme()
+    {
+        var action = new ActionFactice("Je note « x » dans les notes générales. Je confirme ?", "Noté.") { ConfirmationRequise = true };
+        var confirmateur = new ConfirmateurFactice(true);
+        var executeur = Executeur(confirmateur, new OutilFactice("noter_idee", NiveauOutil.Libre, action));
+
+        ResultatOutil resultat = await executeur.ExecuterAsync(Appel("noter_idee"), CancellationToken.None);
+
+        Assert.False(resultat.EstErreur);
+        Assert.Equal(["Je note « x » dans les notes générales. Je confirme ?"], confirmateur.Questions);
+        Assert.Equal([EtapeAudit.Demande, EtapeAudit.Confirme, EtapeAudit.Execute], _journal.Etapes);
+    }
+
+    [Fact]
+    public async Task RefusDUneConfirmationExigeeParLAction_RenvoieSonMessageSansExecuter()
+    {
+        var action = new ActionFactice("Je note ?", "Noté.") { ConfirmationRequise = true, MessageSiRefus = "Demande-lui où ranger la note." };
+        var executeur = Executeur(new ConfirmateurFactice(false), new OutilFactice("noter_idee", NiveauOutil.Libre, action));
+
+        ResultatOutil resultat = await executeur.ExecuterAsync(Appel("noter_idee"), CancellationToken.None);
+
+        Assert.Equal(new ResultatOutil("appel-1", "Demande-lui où ranger la note.", true), resultat);
+        Assert.Equal(0, action.NombreExecutions);
+    }
+
+    [Fact]
+    public async Task OutilConfirme_ResteConfirmeMemeSiLActionNeLExigePas()
+    {
+        var action = new ActionFactice("Je lance le mode jeu.", "Lancé.") { ConfirmationRequise = false };
+        var confirmateur = new ConfirmateurFactice(false);
+        var executeur = Executeur(confirmateur, new OutilFactice("lancer_mode", NiveauOutil.Confirme, action));
+
+        await executeur.ExecuterAsync(Appel("lancer_mode"), CancellationToken.None);
+
+        Assert.Single(confirmateur.Questions);
+        Assert.Equal(0, action.NombreExecutions);
+    }
+
+    [Fact]
+    public async Task ReponseLibreALaConfirmation_RefuseEtRendLaReponseAuModele()
+    {
+        var action = new ActionFactice("Je note ?", "Noté.") { ConfirmationRequise = true };
+        var executeur = Executeur(new ConfirmateurFactice("oui mais dans Xd"), new OutilFactice("noter_idee", NiveauOutil.Libre, action));
+
+        ResultatOutil resultat = await executeur.ExecuterAsync(Appel("noter_idee"), CancellationToken.None);
+
+        Assert.True(resultat.EstErreur);
+        Assert.Contains("« oui mais dans Xd »", resultat.Contenu);
+        Assert.Equal("oui mais dans Xd", resultat.ReponseUtilisateur.Value);
+        Assert.Equal(0, action.NombreExecutions);
+        Assert.Equal([EtapeAudit.Demande, EtapeAudit.Refuse], _journal.Etapes);
+    }
+
+    [Fact]
+    public async Task SansReponse_EstUnRefus()
+    {
+        var action = new ActionFactice("Je lance ?", "Lancé.");
+        var executeur = Executeur(new ConfirmateurFactice(_ => Task.FromResult(MayBe<string>.Null)), new OutilFactice("lancer_mode", NiveauOutil.Confirme, action));
+
+        ResultatOutil resultat = await executeur.ExecuterAsync(Appel("lancer_mode"), CancellationToken.None);
+
+        Assert.True(resultat.EstErreur);
+        Assert.Equal(0, action.NombreExecutions);
+    }
+
+    [Fact]
+    public async Task QuestionDuModeleQuiCiteLesElements_EstPosee()
+    {
+        var action = new ActionFactice("Je note « x » dans les notes générales. Je confirme ?", "Noté.") { ConfirmationRequise = true, ElementsACiter = ["générales"] };
+        var confirmateur = new ConfirmateurFactice(true);
+        var executeur = Executeur(confirmateur, new OutilFactice("noter_idee", NiveauOutil.Libre, action));
+
+        await executeur.ExecuterAsync(Appel("noter_idee", """{"question_confirmation":"Je la mets dans tes notes générales ?"}"""), CancellationToken.None);
+
+        Assert.Equal(["Je la mets dans tes notes générales ?"], confirmateur.Questions);
+    }
+
+    [Theory]
+    [InlineData("""{"question_confirmation":"Je mets un peu de musique ?"}""")]
+    [InlineData("""{"question_confirmation":""}""")]
+    [InlineData("""{"question_confirmation":42}""")]
+    [InlineData("""{}""")]
+    public async Task QuestionDuModeleAbsenteOuQuiNeCitePasLesElements_EstRemplaceeParLaReformulation(string parametres)
+    {
+        var action = new ActionFactice("Je lance le mode jeu : Unity et Discord. Je confirme ?", "Lancé.") { ElementsACiter = ["jeu"] };
+        var confirmateur = new ConfirmateurFactice(false);
+        var executeur = Executeur(confirmateur, new OutilFactice("lancer_mode", NiveauOutil.Confirme, action));
+
+        await executeur.ExecuterAsync(Appel("lancer_mode", parametres), CancellationToken.None);
+
+        Assert.Equal(["Je lance le mode jeu : Unity et Discord. Je confirme ?"], confirmateur.Questions);
+    }
+
+    [Fact]
+    public async Task ActionSansElementsACiter_UtiliseToujoursLaReformulation()
+    {
+        var action = new ActionFactice("Je lance le mode jeu. Je confirme ?", "Lancé.");
+        var confirmateur = new ConfirmateurFactice(false);
+        var executeur = Executeur(confirmateur, new OutilFactice("lancer_mode", NiveauOutil.Confirme, action));
+
+        await executeur.ExecuterAsync(Appel("lancer_mode", """{"question_confirmation":"On lance le mode jeu ?"}"""), CancellationToken.None);
+
+        Assert.Equal(["Je lance le mode jeu. Je confirme ?"], confirmateur.Questions);
+    }
+
+    [Fact]
+    public async Task QuestionDuModele_EstRetireeDesParametresAvantLOutil()
+    {
+        JsonElement? recus = null;
+        var outil = new OutilFactice("etat_machine", NiveauOutil.Libre, parametres =>
+        {
+            recus = parametres;
+            return Result.Ok<IActionPreparee>(new ActionFactice("x", "x"));
+        });
+
+        await Executeur(new ConfirmateurFactice(true), outil)
+            .ExecuterAsync(Appel("etat_machine", """{"aspect":"ram","question_confirmation":"?"}"""), CancellationToken.None);
+
+        Assert.Equal(["aspect"], recus?.EnumerateObject().Select(p => p.Name));
+    }
+
+    [Fact]
+    public void Definitions_ProposentLaQuestionDeConfirmationAChaqueOutil()
+    {
+        var outil = new OutilFactice("noter_idee", NiveauOutil.Libre, new ActionFactice("x", "x"))
+        {
+            SchemaParametres = JsonDocument.Parse("""{"type":"object","properties":{"texte":{"type":"string"}}}""").RootElement,
+        };
+
+        JsonElement proprietes = Executeur(new ConfirmateurFactice(true), outil).Definitions[0].SchemaParametres.GetProperty("properties");
+
+        Assert.Equal(["texte", "question_confirmation"], proprietes.EnumerateObject().Select(p => p.Name));
+    }
+
+    [Fact]
     public async Task Preparer_RecoitLaPhraseDeLUtilisateur()
     {
         var outil = new OutilFactice("etat_machine", NiveauOutil.Libre, new ActionFactice("Lire la RAM", "RAM : 40 %"));
@@ -216,7 +352,8 @@ public sealed class ExecuteurOutilsTests
 
         await executeur.ExecuterAsync(Appel("etat_machine"), CancellationToken.None);
 
-        Assert.Equal([new ContexteAppel("lance le mode jeu")], outil.Contextes);
+        ContexteAppel contexte = Assert.Single(outil.Contextes);
+        Assert.Equal(["lance le mode jeu"], contexte.Paroles);
     }
 
     [Fact]

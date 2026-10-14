@@ -3,10 +3,14 @@ using System.Text.Json;
 namespace Xd.Core.Execution;
 
 /// <summary>
-/// Demande d'outil émise par Claude (bloc <c>tool_use</c>).
+/// Demande d'outil émise par le modèle (bloc <c>tool_use</c>).
 /// </summary>
 /// <param name="IdAppel">Identifiant du bloc <c>tool_use</c>, à reprendre dans le <c>tool_result</c>.</param>
 /// <param name="NomOutil">Nom de l'outil demandé.</param>
 /// <param name="Parametres">Paramètres bruts.</param>
 /// <param name="DemandeUtilisateur">Phrase de l'utilisateur à l'origine de l'appel, pour le journal d'audit.</param>
-public sealed record AppelOutil(string IdAppel, string NomOutil, JsonElement Parametres, string DemandeUtilisateur);
+public sealed record AppelOutil(string IdAppel, string NomOutil, JsonElement Parametres, string DemandeUtilisateur)
+{
+    /// <summary>Réponses libres de l'utilisateur déjà données pendant cette demande (voir <see cref="ResultatOutil.ReponseUtilisateur"/>).</summary>
+    public IReadOnlyList<string> ReponsesUtilisateur { get; init; } = [];
+}

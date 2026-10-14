@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Rotomeca.Rop;
 using Rotomeca.Rop.Interfaces;
 using Xd.Core.Outils;
@@ -9,28 +8,24 @@ using Xd.Core.Outils;
 namespace Xd.Tools.Notes;
 
 /// <summary>
-/// <c>noter_idee</c> (niveau <see cref="NiveauOutil.Libre"/>) : ajoute une ligne horodatée à la fin d'un fichier de notes.
+/// <c>noter_idee</c> (niveau <see cref="NiveauOutil.Libre"/>) : ajoute une ligne horodatée à la fin d'un carnet de notes.
 /// Ajout uniquement, jamais de réécriture ni de suppression.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Destination obligatoire : <c>general</c> (notes générales) ou un projet connu. Elle doit être <b>citée dans la phrase
-/// de l'utilisateur</b> (<see cref="ContexteAppel.DemandeUtilisateur"/>) : le modèle ne choisit jamais à sa place,
-/// il redemande.
+/// Destination : <c>general</c>, un carnet existant, ou un <b>nouveau carnet</b> dont le nom vient des paroles de l'utilisateur
+/// (vérifié, comme un chemin : invariant 5) ; créer un carnet demande toujours confirmation.
 /// </para>
 /// <para>
-/// Fichiers : <c>{dossier}/general.md</c> et <c>{dossier}/projets/{projet}.md</c>. Le dossier vient de la configuration,
-/// le nom de projet de la liste fermée des projets connus (invariant 5).
+/// Une destination existante que l'utilisateur n'a pas citée est une proposition du modèle : l'action exige alors une confirmation,
+/// et un refus renvoie au modèle la question à poser.
 /// </para>
 /// </remarks>
 public sealed class OutilNoterIdee : IOutil
 {
     internal const int LongueurMax = 1000;
-    internal const string General = "general";
     private const string ParametreTexte = "texte";
     private const string ParametreDestination = "destination";
-
-    private static readonly string[] FormulationsGenerales = ["general", "sans projet", "aucun projet", "divers"];
 
     private readonly IStockageConfigurationNotes _configuration;
     private readonly TimeProvider _horloge;
@@ -46,11 +41,14 @@ public sealed class OutilNoterIdee : IOutil
 
     /// <inheritdoc/>
     public string Description =>
-        "Note une idée ou un rappel de l'utilisateur. destination : « general » pour les notes générales, ou le nom d'un projet. "
-        + "Si l'utilisateur n'a pas dit où ranger la note, demande-le-lui au lieu de choisir.";
+        "Note une idée ou un rappel de l'utilisateur dans un carnet : « general » pour les notes générales, un carnet existant, "
+        + "ou un nouveau carnet si l'utilisateur en nomme un (il sera créé après confirmation). "
+        + "Si l'utilisateur n'a pas dit où ranger la note, propose « general » : il devra confirmer.";
 
     /// <inheritdoc/>
-    /// <remarks>La liste des projets est relue à chaque fois : un dossier de projets ajouté apparaît aussitôt.</remarks>
+    /// <remarks>
+    /// Pas d'énumération : un nouveau carnet a un nom libre, validé dans le code. Les carnets existants sont relus à chaque fois.
+    /// </remarks>
     public JsonElement SchemaParametres => JsonSerializer.SerializeToElement(new Dictionary<string, object>
     {
         ["type"] = "object",
@@ -64,8 +62,7 @@ public sealed class OutilNoterIdee : IOutil
             [ParametreDestination] = new Dictionary<string, object>
             {
                 ["type"] = "string",
-                ["enum"] = Destinations(ProjetsConnus()),
-                ["description"] = "Où ranger la note, telle que l'utilisateur l'a dit.",
+                ["description"] = $"Carnet, tel que l'utilisateur l'a nommé. Carnets existants : {string.Join(", ", CarnetsConnus())}.",
             },
         },
         ["required"] = new[] { ParametreTexte, ParametreDestination },
@@ -96,44 +93,41 @@ public sealed class OutilNoterIdee : IOutil
         if (texte.Length > LongueurMax)
             return Invalide($"la note dépasse {LongueurMax} caractères.");
 
+        if (!parametres.TryGetProperty(ParametreDestination, out JsonElement valeurDestination) || valeurDestination.ValueKind != JsonValueKind.String
+            || (valeurDestination.GetString() ?? string.Empty).Trim() is not { Length: > 0 } destination)
+            return Invalide($"le paramètre « {ParametreDestination} » est obligatoire.");
+
         return _configuration.Lire().Match(
-            Ok: configuration => PreparerAvec(configuration, parametres, texte, contexte),
+            Ok: configuration => PreparerAvec(configuration, texte, destination, contexte),
             Err: erreur => Result.Fail<IActionPreparee>(erreur));
     }
 
-    private IResult<IActionPreparee> PreparerAvec(ConfigurationNotes configuration, JsonElement parametres, string texte, ContexteAppel contexte)
+    private IResult<IActionPreparee> PreparerAvec(ConfigurationNotes configuration, string texte, string destination, ContexteAppel contexte)
     {
-        if (string.IsNullOrWhiteSpace(configuration.DossierNotes))
+        if (string.IsNullOrWhiteSpace(configuration.DossierNotes) || configuration.DossierNotes is not { } dossier)
         {
             return Invalide("aucun dossier de notes n'est configuré. Demande à l'utilisateur où ranger ses notes "
-                + "(un chemin complet, « dans mes documents » ou « par défaut »), puis appelle configurer_notes.");
+                + "(« dans mes documents », « par défaut », ou un chemin complet au clavier), puis appelle configurer_notes.");
         }
 
-        IReadOnlyList<string> destinations = Destinations(CatalogueProjets.Lister(configuration.DossiersProjets));
-        string destination = parametres.TryGetProperty(ParametreDestination, out JsonElement valeur) && valeur.ValueKind == JsonValueKind.String
-            ? valeur.GetString() ?? string.Empty
-            : string.Empty;
+        IReadOnlyList<string> carnets = CatalogueCarnets.Lister(dossier);
+        string siRefus = $"L'utilisateur a refusé ce carnet. {QuestionCarnet(carnets)}";
+        var existant = CatalogueCarnets.Trouver(carnets, destination);
 
-        // Valeur exacte de la liste fermée (invariant 4) : elle devient un nom de fichier (invariant 5).
-        if (!destinations.Contains(destination, StringComparer.Ordinal) || !CatalogueProjets.EstNomValide(destination))
-            return Invalide($"destination inconnue : « {destination} ». {QuestionDestination(destinations)}");
+        if (existant.Value is { } carnet)
+        {
+            // Carnet non cité par l'utilisateur : c'est une proposition du modèle, que l'utilisateur doit valider.
+            bool aConfirmer = !CatalogueCarnets.EstCite(contexte.Paroles, carnet);
+            return Result.Ok<IActionPreparee>(new ActionNoter(dossier, carnet, Libelle(carnet), texte, Creation: false, aConfirmer, siRefus, _horloge));
+        }
 
-        // La destination doit venir de l'utilisateur, pas d'une supposition du modèle.
-        if (!EstCitee(contexte.DemandeUtilisateur, destination))
-            return Invalide($"l'utilisateur n'a pas dit où ranger cette note. {QuestionDestination(destinations)} Ne choisis pas à sa place.");
+        // Nouveau carnet : son nom devient un nom de fichier, il doit venir de l'utilisateur (invariant 5).
+        if (!CatalogueCarnets.EstNomValide(destination))
+            return Invalide($"« {destination} » ne peut pas servir de nom de carnet. {QuestionCarnet(carnets)}");
+        if (!CatalogueCarnets.EstCite(contexte.Paroles, destination))
+            return Invalide($"l'utilisateur n'a pas nommé de carnet « {destination} ». {QuestionCarnet(carnets)} Ne choisis pas le nom à sa place.");
 
-        return Result.Ok<IActionPreparee>(destination == General
-            ? new ActionNoter(Path.Combine(configuration.DossierNotes, "general.md"), configuration.DossierNotes, "les notes générales", texte, _horloge)
-            : new ActionNoter(Path.Combine(configuration.DossierNotes, "projets", destination + ".md"), configuration.DossierNotes, $"les notes du projet {destination}", texte, _horloge));
-    }
-
-    /// <summary>La phrase de l'utilisateur nomme-t-elle cette destination (accents et casse ignorés, mot entier) ?</summary>
-    internal static bool EstCitee(string phrase, string destination)
-    {
-        string normalisee = Normaliser(phrase);
-        return destination == General
-            ? FormulationsGenerales.Any(f => ContientMot(normalisee, f, motEntier: false))
-            : ContientMot(normalisee, Normaliser(destination), motEntier: true);
+        return Result.Ok<IActionPreparee>(new ActionNoter(dossier, destination, Libelle(destination), texte, Creation: true, AConfirmer: true, siRefus, _horloge));
     }
 
     /// <summary>Une note = une ligne : retours à la ligne et caractères de contrôle remplacés par des espaces.</summary>
@@ -146,59 +140,58 @@ public sealed class OutilNoterIdee : IOutil
         return string.Join(' ', resultat.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries));
     }
 
-    private static string QuestionDestination(IReadOnlyList<string> destinations) => destinations.Count > 1
-        ? $"Demande-lui : dans les notes générales ou dans un projet ({string.Join(", ", destinations.Skip(1))}) ?"
-        : "Demande-lui s'il veut la mettre dans les notes générales.";
+    private static string Libelle(string carnet) => carnet == CatalogueCarnets.General ? "les notes générales" : $"le carnet {carnet}";
 
-    // « general » en premier ; un projet nommé « general » se confondrait avec les notes générales.
-    private static string[] Destinations(IReadOnlyList<string> projets) =>
-        [General, .. projets.Where(p => !string.Equals(p, General, StringComparison.OrdinalIgnoreCase))];
+    private static string QuestionCarnet(IReadOnlyList<string> carnets) => carnets.Count > 1
+        ? $"Demande-lui : dans les notes générales, dans un carnet existant ({string.Join(", ", carnets.Skip(1))}) ou dans un nouveau carnet ?"
+        : "Demande-lui : dans les notes générales ou dans un nouveau carnet (et lequel) ?";
 
-    // « general » couvre « générale(s) » : un préfixe suffit. Un projet doit être cité en mot entier (« Xd » n'est pas « xdebug »).
-    private static bool ContientMot(string texte, string mot, bool motEntier) =>
-        Regex.IsMatch(texte, $@"(?<![\p{{L}}\p{{N}}]){Regex.Escape(mot)}" + (motEntier ? @"(?![\p{L}\p{N}])" : string.Empty));
-
-    private static string Normaliser(string texte)
-    {
-        var resultat = new StringBuilder(texte.Length);
-        foreach (char caractere in texte.ToLowerInvariant().Normalize(NormalizationForm.FormD))
-        {
-            if (CharUnicodeInfo.GetUnicodeCategory(caractere) != UnicodeCategory.NonSpacingMark)
-                resultat.Append(caractere);
-        }
-
-        return resultat.ToString();
-    }
-
-    private IReadOnlyList<string> ProjetsConnus() =>
-        _configuration.Lire().Match(Ok: c => CatalogueProjets.Lister(c.DossiersProjets), Err: _ => []);
+    private IReadOnlyList<string> CarnetsConnus() =>
+        _configuration.Lire().Match(
+            Ok: c => c.DossierNotes is { } dossier ? CatalogueCarnets.Lister(dossier) : [CatalogueCarnets.General],
+            Err: _ => [CatalogueCarnets.General]);
 
     private static IResult<IActionPreparee> Invalide(string message) =>
         Result.Fail<IActionPreparee>(new Error(message, ErrorType.Validation));
 
-    private sealed class ActionNoter(string fichier, string dossierNotes, string destination, string texte, TimeProvider horloge) : IActionPreparee
+    private sealed record ActionNoter(
+        string DossierNotes, string Carnet, string Libelle, string Texte, bool Creation, bool AConfirmer, string SiRefus, TimeProvider Horloge)
+        : IActionPreparee
     {
-        public string Reformulation => $"Je note dans {destination} : « {texte} ».";
+        public string Reformulation => (Creation, AConfirmer) switch
+        {
+            (true, _) => $"Je crée le carnet « {Carnet} » et j'y note « {Texte} ». Je confirme ?",
+            (false, true) => $"Je note « {Texte} » dans {Libelle}. Je confirme ?",
+            _ => $"Je note dans {Libelle} : « {Texte} ».",
+        };
+
+        public bool ConfirmationRequise => AConfirmer;
+
+        public string MessageSiRefus => SiRefus;
+
+        // Une question rédigée par le modèle doit nommer le carnet (« générales » ou son nom).
+        public IReadOnlyList<string> ElementsACiter => [Carnet == CatalogueCarnets.General ? "générales" : Carnet];
 
         public async Task<IResult<string>> ExecuterAsync(CancellationToken annulation)
         {
             // Le dossier de notes a pu être supprimé ou débranché : on ne le recrée pas sans l'utilisateur.
-            if (!Directory.Exists(dossierNotes))
+            if (!Directory.Exists(DossierNotes))
             {
                 return Result.Fail<string>(new Error(
-                    $"le dossier de notes « {dossierNotes} » est introuvable. Demande à l'utilisateur s'il faut en choisir un autre.",
+                    $"le dossier de notes « {DossierNotes} » est introuvable. Demande à l'utilisateur s'il faut en choisir un autre.",
                     ErrorType.NotFound));
             }
 
-            string horodatage = horloge.GetLocalNow().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+            string fichier = CatalogueCarnets.Fichier(DossierNotes, Carnet);
+            string horodatage = Horloge.GetLocalNow().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
             try
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(fichier) ?? dossierNotes);
-                string entete = File.Exists(fichier) ? string.Empty : $"# {Path.GetFileNameWithoutExtension(fichier)}{Environment.NewLine}{Environment.NewLine}";
+                Directory.CreateDirectory(Path.GetDirectoryName(fichier) ?? DossierNotes);
+                string entete = File.Exists(fichier) ? string.Empty : $"# {Carnet}{Environment.NewLine}{Environment.NewLine}";
 
                 // Ajout en fin de fichier uniquement.
-                await File.AppendAllTextAsync(fichier, $"{entete}- {horodatage} — {texte}{Environment.NewLine}", annulation);
-                return Result.Ok($"Noté dans {destination}.");
+                await File.AppendAllTextAsync(fichier, $"{entete}- {horodatage} — {Texte}{Environment.NewLine}", annulation);
+                return Result.Ok($"Noté dans {Libelle}, fichier : {fichier}. Donne ce chemin tel quel si l'utilisateur demande où est la note.");
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

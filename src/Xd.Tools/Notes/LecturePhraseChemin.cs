@@ -5,16 +5,6 @@ using Rotomeca.Rop.Interfaces;
 
 namespace Xd.Tools.Notes;
 
-/// <summary>Dossier que <c>configurer_notes</c> enregistre.</summary>
-public enum ElementNotes
-{
-    /// <summary>Dossier central des notes (créé s'il n'existe pas).</summary>
-    DossierNotes,
-
-    /// <summary>Dossier dont chaque sous-dossier est un projet (doit exister).</summary>
-    DossierProjets,
-}
-
 /// <summary>
 /// Lecture d'un chemin dans la phrase de l'utilisateur (jamais dans le texte du modèle), puis validation.
 /// </summary>
@@ -27,6 +17,7 @@ public sealed class LecturePhraseChemin
     private static readonly Regex SousDossier = new(
         @"(?:sous[- ]?dossier|sous[- ]?r[ée]pertoire|dossier|r[ée]pertoire)\s+(?:nomm[ée]\s+|appel[ée]\s+)?[«""“]?\s*([^\s,.;!?«»""”\\/]+)",
         RegexOptions.IgnoreCase);
+    private static readonly Regex DocumentsBarre = new(@"mes\s+documents\s*[\\/]\s*([^\s,.;!?«»""”\\/]+)", RegexOptions.IgnoreCase);
     private static readonly char[] PonctuationFinale = ['.', ',', ';', '!', '?', ')', ' ', '\t'];
 
     private readonly string _documents;
@@ -57,7 +48,7 @@ public sealed class LecturePhraseChemin
     public string DossierNotesParDefaut => Path.Combine(_documents, "xd", "notes");
 
     /// <summary>Trouve un chemin dans la phrase : entre guillemets, absolu (<c>D:\Notes</c>, <c>/home/…</c>, <c>~/…</c>) ou par mot-clé.</summary>
-    public MayBe<string> Extraire(string phrase, ElementNotes element)
+    public MayBe<string> Extraire(string phrase)
     {
         Match entreGuillemets = Guillemets.Match(phrase);
         if (entreGuillemets.Success && DebutDeChemin.IsMatch(entreGuillemets.Groups[1].Value))
@@ -70,23 +61,24 @@ public sealed class LecturePhraseChemin
             return Delimiter(Developper(absolu.Value));
 
         string minuscules = phrase.ToLowerInvariant();
-        if (element != ElementNotes.DossierNotes)
-            return MayBe<string>.Null;
 
-        // « dans mes documents, sous-dossier TEST » : sous-dossier nommé des Documents.
+        // « mes documents/TEST », « dans mes documents, sous-dossier TEST » : sous-dossier nommé des Documents.
         if (minuscules.Contains("mes documents"))
         {
-            Match sousDossier = SousDossier.Match(phrase);
-            return sousDossier.Success && CatalogueProjets.EstNomValide(sousDossier.Groups[1].Value)
-                ? Path.Combine(_documents, sousDossier.Groups[1].Value)
-                : DossierNotesParDefaut;
+            Match sousDossier = DocumentsBarre.Match(phrase);
+            if (!sousDossier.Success)
+                sousDossier = SousDossier.Match(phrase);
+            if (sousDossier.Success && CatalogueCarnets.EstNomValide(sousDossier.Groups[1].Value))
+                return Path.Combine(_documents, sousDossier.Groups[1].Value);
+
+            return DossierNotesParDefaut;
         }
 
         return minuscules.Contains("par défaut") || minuscules.Contains("par defaut") ? DossierNotesParDefaut : MayBe<string>.Null;
     }
 
-    /// <summary>Vérifie qu'un chemin est acceptable pour l'élément demandé et le normalise.</summary>
-    public IResult<string> Valider(string chemin, ElementNotes element)
+    /// <summary>Vérifie qu'un chemin est acceptable pour le dossier de notes et le normalise.</summary>
+    public IResult<string> Valider(string chemin)
     {
         if (!EstAbsolu(chemin))
             return Refus($"« {chemin} » n'est pas un chemin complet.");
@@ -101,8 +93,6 @@ public sealed class LecturePhraseChemin
             return Refus($"« {complet} » est un dossier système.");
         if (File.Exists(complet))
             return Refus($"« {complet} » est un fichier, pas un dossier.");
-        if (element == ElementNotes.DossierProjets && !_dossierExiste(complet))
-            return Refus($"le dossier « {complet} » n'existe pas.");
 
         return Result.Ok(complet);
     }

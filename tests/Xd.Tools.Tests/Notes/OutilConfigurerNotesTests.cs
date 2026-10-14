@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rotomeca.Core.Optionals;
 using Rotomeca.Rop;
 using Rotomeca.Rop.Interfaces;
 using Xd.Core.Audit;
@@ -11,45 +12,38 @@ namespace Xd.Tools.Tests.Notes;
 
 public sealed class OutilConfigurerNotesTests : IDisposable
 {
-    private readonly string _racine = Path.Combine(Path.GetTempPath(), "xd-tests-" + Guid.NewGuid().ToString("N"));
+    private readonly DossierTemporaire _racine = new();
     private readonly ConfigurationEnMemoire _configuration = new();
 
-    public OutilConfigurerNotesTests()
-    {
-        Directory.CreateDirectory(Path.Combine(_racine, "projets", "Xd"));
-        Directory.CreateDirectory(Path.Combine(_racine, "projets", "Rotomeca"));
-    }
+    private string DossierNotes => Path.Combine(_racine.Chemin, "notes");
 
-    private string DossierNotes => Path.Combine(_racine, "notes");
-    private string DossierProjets => Path.Combine(_racine, "projets");
-
-    public void Dispose() => Directory.Delete(_racine, recursive: true);
+    public void Dispose() => _racine.Dispose();
 
     private OutilConfigurerNotes Outil() => new(_configuration, new LecturePhraseChemin(
-        Path.Combine(_racine, "Documents"), _racine, Directory.Exists, []));
+        Path.Combine(_racine.Chemin, "Documents"), _racine.Chemin, Directory.Exists, []));
 
-    private static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement.Clone();
-
-    private IResult<IActionPreparee> Preparer(string parametres, string phrase) => Outil().Preparer(Json(parametres), new ContexteAppel(phrase));
+    private IResult<IActionPreparee> Preparer(string parametres, params string[] paroles) =>
+        Outil().Preparer(JsonDocument.Parse(parametres).RootElement, new ContexteAppel(paroles[0]) { ReponsesUtilisateur = paroles[1..] });
 
     private static IActionPreparee Action(IResult<IActionPreparee> resultat) =>
         resultat.Match(Ok: a => a, Err: e => throw new Xunit.Sdk.XunitException(e.Message));
 
     [Fact]
-    public void Definition_EstConfirmeeEtSansParametreDeChemin()
+    public void Definition_EstConfirmeeEtSansParametre()
     {
         OutilConfigurerNotes outil = Outil();
 
         Assert.Equal(NiveauOutil.Confirme, outil.Niveau);
-        Assert.Equal(["element"], outil.SchemaParametres.GetProperty("properties").EnumerateObject().Select(p => p.Name));
+        Assert.Empty(outil.SchemaParametres.GetProperty("properties").EnumerateObject());
     }
 
     [Fact]
-    public async Task DossierDeNotes_EstLuDansLaPhraseConfirmePuisEnregistre()
+    public async Task Dossier_EstLuDansLaPhraseConfirmePuisEnregistre()
     {
-        IActionPreparee action = Action(Preparer("""{"element":"dossier_notes"}""", $"Range-les dans {DossierNotes}."));
+        IActionPreparee action = Action(Preparer("{}", $"Range-les dans {DossierNotes}."));
 
         Assert.Equal($"Je range tes notes dans « {DossierNotes} », un nouveau dossier que je vais créer. Je confirme ?", action.Reformulation);
+        Assert.Equal([DossierNotes], action.ElementsACiter);
         Assert.False(Directory.Exists(DossierNotes));
 
         Assert.True((await action.ExecuterAsync(CancellationToken.None)).IsSuccess);
@@ -57,50 +51,41 @@ public sealed class OutilConfigurerNotesTests : IDisposable
         Assert.Equal(DossierNotes, _configuration.Valeur.DossierNotes);
     }
 
-    [Fact]
-    public void ParDefaut_ProposeLeDossierDesDocuments()
+    [Theory]
+    [InlineData("par défaut, ça ira", "xd", "notes")]
+    [InlineData("dans mes documents, dossier TEST", "TEST", "")]
+    [InlineData("mes documents/TEST", "TEST", "")]
+    public void RaccourcisDictables_DonnentUnDossierDesDocuments(string phrase, string sousDossier, string sousSousDossier)
     {
-        IActionPreparee action = Action(Preparer("""{"element":"dossier_notes"}""", "par défaut, ça ira"));
+        IActionPreparee action = Action(Preparer("{}", phrase));
 
-        Assert.Contains(Path.Combine(_racine, "Documents", "xd", "notes"), action.Reformulation);
+        Assert.Contains(Path.TrimEndingDirectorySeparator(Path.Combine(_racine.Chemin, "Documents", sousDossier, sousSousDossier)), action.Reformulation);
     }
 
     [Fact]
-    public async Task DossierDeProjets_ListeSesProjetsEtNEstAjouteQuUneFois()
+    public void DossierDonneDansUneReponseUlterieure_EstPrefere()
     {
-        IActionPreparee action = Action(Preparer("""{"element":"dossier_projets"}""", $"mes projets sont dans {DossierProjets}"));
-        Assert.Equal($"J'ajoute « {DossierProjets} » comme dossier de projets (2 projets : Rotomeca, Xd). Je confirme ?", action.Reformulation);
+        IActionPreparee action = Action(Preparer("{}", $"range mes notes dans {Path.Combine(_racine.Chemin, "ancien")}", $"non, plutôt dans {DossierNotes}"));
 
-        await action.ExecuterAsync(CancellationToken.None);
-        await action.ExecuterAsync(CancellationToken.None);
-
-        Assert.Equal([DossierProjets], _configuration.Valeur.DossiersProjets);
+        Assert.Contains(DossierNotes, action.Reformulation);
     }
 
     [Theory]
-    [InlineData("""{"element":"dossier_notes","chemin":"C:\\Windows"}""")]
-    [InlineData("""{"element":"fichier_systeme"}""")]
-    [InlineData("""{"element":"DOSSIER_NOTES"}""")]
-    [InlineData("""{}""")]
+    [InlineData("""{"chemin":"C:\\Windows"}""")]
+    [InlineData("""{"element":"dossier_notes"}""")]
+    [InlineData("""[]""")]
     public void ParametresHorsContrat_SontRefuses(string parametres)
     {
         Assert.False(Preparer(parametres, $"dans {DossierNotes}").IsSuccess);
     }
 
     [Fact]
-    public void CheminDansLeTexteDuModele_NEstJamaisLu()
+    public void SansDossierDansLesParoles_LeModeleDoitRedemander()
     {
-        // Seule la phrase de l'utilisateur compte : sans chemin dedans, l'outil refuse.
-        IResult<IActionPreparee> resultat = Preparer("""{"element":"dossier_notes"}""", "je ne sais pas, choisis pour moi");
+        IResult<IActionPreparee> resultat = Preparer("{}", "je ne sais pas, choisis pour moi");
 
         Assert.False(resultat.IsSuccess);
         Assert.Contains("Redemande", resultat.Match(Ok: _ => string.Empty, Err: e => e.Message));
-    }
-
-    [Fact]
-    public void DossierDeProjetsInexistant_EstRefuse()
-    {
-        Assert.False(Preparer("""{"element":"dossier_projets"}""", $"dans {Path.Combine(_racine, "absent")}").IsSuccess);
     }
 
     [Fact]
@@ -109,29 +94,16 @@ public sealed class OutilConfigurerNotesTests : IDisposable
         var executeur = new ExecuteurOutils([Outil()], new ConfirmateurQuiRefuse(), new JournalMuet(), TimeProvider.System);
 
         ResultatOutil resultat = await executeur.ExecuterAsync(
-            new AppelOutil("a1", "configurer_notes", Json("""{"element":"dossier_notes"}"""), $"dans {DossierNotes}"), CancellationToken.None);
+            new AppelOutil("a1", "configurer_notes", JsonDocument.Parse("{}").RootElement, $"dans {DossierNotes}"), CancellationToken.None);
 
         Assert.True(resultat.EstErreur);
         Assert.Null(_configuration.Valeur.DossierNotes);
         Assert.False(Directory.Exists(DossierNotes));
     }
 
-    private sealed class ConfigurationEnMemoire : IStockageConfigurationNotes
-    {
-        public ConfigurationNotes Valeur { get; private set; } = ConfigurationNotes.Vide;
-
-        public IResult<ConfigurationNotes> Lire() => Result.Ok(Valeur);
-
-        public IResult<bool> Ecrire(ConfigurationNotes configuration)
-        {
-            Valeur = configuration;
-            return Result.Ok(true);
-        }
-    }
-
     private sealed class ConfirmateurQuiRefuse : IConfirmateur
     {
-        public Task<bool> ConfirmerAsync(string reformulation, CancellationToken annulation) => Task.FromResult(false);
+        public Task<MayBe<string>> PoserQuestionAsync(string question, CancellationToken annulation) => Task.FromResult<MayBe<string>>("non");
     }
 
     private sealed class JournalMuet : IJournalAudit

@@ -11,9 +11,9 @@ public sealed class LecturePhraseCheminTests
     private static LecturePhraseChemin Lecture(params string[] dossiersExistants) =>
         new(Documents, Path.GetTempPath(), chemin => dossiersExistants.Contains(chemin, StringComparer.OrdinalIgnoreCase), [Systeme]);
 
-    private static string? Extraire(LecturePhraseChemin lecture, string phrase, ElementNotes element = ElementNotes.DossierNotes)
+    private static string? Extraire(LecturePhraseChemin lecture, string phrase)
     {
-        var resultat = lecture.Extraire(phrase, element);
+        var resultat = lecture.Extraire(phrase);
         return resultat.HasValue ? resultat.Value : null;
     }
 
@@ -48,6 +48,8 @@ public sealed class LecturePhraseCheminTests
     [InlineData("dans mes documents, sous-dossier « Idées »", "Idées")]
     [InlineData("Mets-les dans mes documents dans un dossier nommé Notes.", "Notes")]
     [InlineData("dans mes documents, répertoire perso_2", "perso_2")]
+    [InlineData("mes documents/TEST", "TEST")]
+    [InlineData(@"dans mes documents\TEST stp", "TEST")]
     public void MesDocumentsAvecSousDossier_DonneCeSousDossier(string phrase, string sousDossier)
     {
         Assert.Equal(Path.Combine(Documents, sousDossier), Extraire(Lecture(), phrase));
@@ -71,12 +73,6 @@ public sealed class LecturePhraseCheminTests
     }
 
     [Fact]
-    public void MotClePourUnDossierDeProjets_NeDonneRien()
-    {
-        Assert.Null(Extraire(Lecture(), "par défaut", ElementNotes.DossierProjets));
-    }
-
-    [Fact]
     public void Tilde_EstDeveloppeVersLeDossierPersonnel()
     {
         Assert.Equal(Path.Combine(Path.GetTempPath(), "notes"), Extraire(Lecture(), "dans ~/notes"));
@@ -87,7 +83,7 @@ public sealed class LecturePhraseCheminTests
     {
         string dossier = Path.Combine(Path.GetTempPath(), "xd-notes") + Path.DirectorySeparatorChar;
 
-        Assert.Equal(Path.TrimEndingDirectorySeparator(dossier), Valeur(Lecture().Valider(dossier, ElementNotes.DossierNotes)));
+        Assert.Equal(Path.TrimEndingDirectorySeparator(dossier), Valeur(Lecture().Valider(dossier)));
     }
 
     [Theory]
@@ -95,13 +91,13 @@ public sealed class LecturePhraseCheminTests
     [InlineData("..")]
     public void CheminRelatif_EstRefuse(string chemin)
     {
-        Assert.False(Lecture().Valider(chemin, ElementNotes.DossierNotes).IsSuccess);
+        Assert.False(Lecture().Valider(chemin).IsSuccess);
     }
 
     [Fact]
     public void CheminAvecRemontee_EstRefuse()
     {
-        Assert.False(Lecture().Valider(Path.Combine(Path.GetTempPath(), "a", "..", "b"), ElementNotes.DossierNotes).IsSuccess);
+        Assert.False(Lecture().Valider(Path.Combine(Path.GetTempPath(), "a", "..", "b")).IsSuccess);
     }
 
     [Fact]
@@ -109,22 +105,19 @@ public sealed class LecturePhraseCheminTests
     {
         string racine = Path.GetPathRoot(Path.GetTempPath()) ?? "/";
 
-        Assert.False(Lecture().Valider(racine, ElementNotes.DossierNotes).IsSuccess);
+        Assert.False(Lecture().Valider(racine).IsSuccess);
     }
 
     [Fact]
     public void DossierSysteme_EstRefuse()
     {
-        Assert.False(Lecture().Valider(Path.Combine(Systeme, "notes"), ElementNotes.DossierNotes).IsSuccess);
+        Assert.False(Lecture().Valider(Path.Combine(Systeme, "notes")).IsSuccess);
     }
 
     [Fact]
-    public void DossierDeProjetsAbsent_EstRefuse_MaisPasUnDossierDeNotes()
+    public void DossierAbsent_EstAccepte()
     {
-        string absent = Path.Combine(Path.GetTempPath(), "xd-absent-" + Guid.NewGuid().ToString("N"));
-
-        Assert.False(Lecture().Valider(absent, ElementNotes.DossierProjets).IsSuccess);
-        Assert.True(Lecture().Valider(absent, ElementNotes.DossierNotes).IsSuccess);
+        Assert.True(Lecture().Valider(Path.Combine(Path.GetTempPath(), "xd-absent-" + Guid.NewGuid().ToString("N"))).IsSuccess);
     }
 
     private static string Valeur(IResult<string> resultat) => resultat.Match(Ok: c => c, Err: e => "ERREUR " + e.Message);

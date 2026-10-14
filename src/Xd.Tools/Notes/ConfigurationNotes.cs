@@ -8,11 +8,10 @@ namespace Xd.Tools.Notes;
 /// Configuration des notes, dans le dossier de configuration utilisateur (jamais dans le dépôt).
 /// </summary>
 /// <param name="DossierNotes">Dossier central des notes ; <see langword="null"/> tant que l'utilisateur ne l'a pas indiqué.</param>
-/// <param name="DossiersProjets">Dossiers dont chaque sous-dossier est un projet.</param>
-public sealed record ConfigurationNotes(string? DossierNotes, IReadOnlyList<string> DossiersProjets)
+public sealed record ConfigurationNotes(string? DossierNotes)
 {
     /// <summary>Configuration vide : rien n'a encore été indiqué.</summary>
-    public static ConfigurationNotes Vide { get; } = new(null, []);
+    public static ConfigurationNotes Vide { get; } = new((string?)null);
 }
 
 /// <summary>
@@ -55,9 +54,7 @@ public sealed class FichierConfigurationNotes : IStockageConfigurationNotes
         try
         {
             ConfigurationNotes? configuration = JsonSerializer.Deserialize<ConfigurationNotes>(File.ReadAllText(_chemin), OptionsJson);
-            return Result.Ok(configuration is null
-                ? ConfigurationNotes.Vide
-                : configuration with { DossiersProjets = configuration.DossiersProjets ?? [] });
+            return Result.Ok(configuration ?? ConfigurationNotes.Vide);
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {

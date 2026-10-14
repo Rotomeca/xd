@@ -27,6 +27,7 @@ await using ServiceProvider services = new ServiceCollection()
     .AddSingleton(LecturePhraseChemin.Plateforme())
     .AddSingleton<IOutil, OutilNoterIdee>()
     .AddSingleton<IOutil, OutilConfigurerNotes>()
+    .AddSingleton<IOutil, OutilConsulterNotes>()
     .AddSingleton<IMesureMemoireVideo, MesureNvidiaSmi>()
     .AddSingleton<IInteractionInstallation, InteractionConsole>()
     // Téléchargements de plusieurs gigaoctets : pas de délai global, Ctrl+C pour interrompre.

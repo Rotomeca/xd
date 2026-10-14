@@ -5,7 +5,7 @@ using Xd.Core.Execution;
 namespace Xd.Core.Boucle;
 
 /// <summary>
-/// Boucle agentique écrite à la main : envoie l'historique à Claude, fait passer chaque demande d'outil
+/// Boucle agentique écrite à la main : envoie l'historique au modèle, fait passer chaque demande d'outil
 /// par <see cref="ExecuteurOutils"/>, renvoie les résultats et recommence jusqu'à une réponse texte.
 /// Ne lève jamais d'exception : tout échec devient une phrase à dire à l'utilisateur.
 /// </summary>
@@ -44,23 +44,23 @@ public sealed class BoucleAgentique
     public async Task<string> TraiterAsync(string demande, CancellationToken annulation)
     {
         var tour = new List<Message> { new MessageUtilisateur(demande) };
-        string reponse = await PoursuivreAsync(demande, tour, 0, annulation);
+        string reponse = await PoursuivreAsync(new ParolesTour(demande), tour, 0, annulation);
         _historique.AjouterTour(tour);
         return reponse;
     }
 
-    private async Task<string> PoursuivreAsync(string demande, List<Message> tour, int iteration, CancellationToken annulation)
+    private async Task<string> PoursuivreAsync(ParolesTour paroles, List<Message> tour, int iteration, CancellationToken annulation)
     {
         if (annulation.IsCancellationRequested)
             return Conclure(tour, MessageInterruption);
 
         IResult<ReponseModele> resultat = await EnvoyerSansExceptionAsync([.. _historique.Messages, .. tour], annulation);
         return await resultat.Match(
-            Ok: reponse => TraiterReponseAsync(demande, tour, iteration, reponse, annulation),
+            Ok: reponse => TraiterReponseAsync(paroles, tour, iteration, reponse, annulation),
             Err: _ => Task.FromResult(Conclure(tour, annulation.IsCancellationRequested ? MessageInterruption : MessageModeleIndisponible)));
     }
 
-    private async Task<string> TraiterReponseAsync(string demande, List<Message> tour, int iteration, ReponseModele reponse, CancellationToken annulation)
+    private async Task<string> TraiterReponseAsync(ParolesTour paroles, List<Message> tour, int iteration, ReponseModele reponse, CancellationToken annulation)
     {
         BlocAppelOutil[] appels = [.. reponse.Blocs.OfType<BlocAppelOutil>()];
 
@@ -69,23 +69,32 @@ public sealed class BoucleAgentique
             RaisonArret.Refus => Conclure(tour, MessageRefus),
             RaisonArret.LimiteJetons => Conclure(tour, MessageTronque),
             RaisonArret.AppelOutils when appels.Length > 0 && iteration >= PlafondIterations => Conclure(tour, MessagePlafond),
-            RaisonArret.AppelOutils when appels.Length > 0 => await ExecuterPuisPoursuivreAsync(demande, tour, iteration, reponse, appels, annulation),
+            RaisonArret.AppelOutils when appels.Length > 0 => await ExecuterPuisPoursuivreAsync(paroles, tour, iteration, reponse, appels, annulation),
             _ => ConclureAvecTexte(tour, reponse),
         };
     }
 
     private async Task<string> ExecuterPuisPoursuivreAsync(
-        string demande, List<Message> tour, int iteration, ReponseModele reponse, BlocAppelOutil[] appels, CancellationToken annulation)
+        ParolesTour paroles, List<Message> tour, int iteration, ReponseModele reponse, BlocAppelOutil[] appels, CancellationToken annulation)
     {
         tour.Add(new MessageAssistant(reponse.Blocs));
 
         // Séquentiel : une confirmation attend l'utilisateur, les actions ne doivent pas se chevaucher.
         var resultats = new List<ResultatOutil>(appels.Length);
         foreach (BlocAppelOutil appel in appels)
-            resultats.Add(await _executeur.ExecuterAsync(new AppelOutil(appel.IdAppel, appel.NomOutil, appel.Parametres, demande), annulation));
+        {
+            var appelOutil = new AppelOutil(appel.IdAppel, appel.NomOutil, appel.Parametres, paroles.Demande) { ReponsesUtilisateur = [.. paroles.Reponses] };
+            ResultatOutil resultat = await _executeur.ExecuterAsync(appelOutil, annulation);
+
+            // Une réponse libre à une confirmation (« oui mais dans Xd ») fait partie des paroles de l'utilisateur pour la suite.
+            if (resultat.ReponseUtilisateur.Value is { } reponseLibre)
+                paroles.Reponses.Add(reponseLibre);
+
+            resultats.Add(resultat);
+        }
 
         tour.Add(new MessageResultatsOutils(resultats));
-        return await PoursuivreAsync(demande, tour, iteration + 1, annulation);
+        return await PoursuivreAsync(paroles, tour, iteration + 1, annulation);
     }
 
     private async Task<IResult<ReponseModele>> EnvoyerSansExceptionAsync(IReadOnlyList<Message> messages, CancellationToken annulation)
@@ -104,6 +113,13 @@ public sealed class BoucleAgentique
     {
         string texte = string.Join(" ", reponse.Blocs.OfType<BlocTexte>().Select(b => b.Texte.Trim()).Where(t => t.Length > 0));
         return Conclure(tour, texte.Length > 0 ? texte : MessageVide);
+    }
+
+    /// <summary>Paroles de l'utilisateur pendant un tour : sa demande, puis ses réponses libres aux confirmations.</summary>
+    private sealed class ParolesTour(string demande)
+    {
+        public string Demande { get; } = demande;
+        public List<string> Reponses { get; } = [];
     }
 
     /// <summary>Termine le tour par un texte de l'assistant, seul message enregistré après un échec.</summary>

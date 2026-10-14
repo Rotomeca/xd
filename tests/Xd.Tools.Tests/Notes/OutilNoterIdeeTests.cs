@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Rotomeca.Rop;
 using Rotomeca.Rop.Interfaces;
 using Xd.Core.Outils;
 using Xd.Tools.Notes;
@@ -8,57 +7,105 @@ namespace Xd.Tools.Tests.Notes;
 
 public sealed class OutilNoterIdeeTests : IDisposable
 {
-    private const string PhraseGenerale = "note dans mes notes générales que je dois revoir le prompt";
-    private const string PhraseXd = "note pour le projet Xd que je dois revoir le prompt";
-
-    private readonly string _racine = Path.Combine(Path.GetTempPath(), "xd-tests-" + Guid.NewGuid().ToString("N"));
+    private readonly DossierTemporaire _racine = new();
     private readonly ConfigurationEnMemoire _configuration = new();
 
     public OutilNoterIdeeTests()
     {
-        Directory.CreateDirectory(DossierNotes);
-        Directory.CreateDirectory(Path.Combine(DossierProjets, "Xd"));
-        Directory.CreateDirectory(Path.Combine(DossierProjets, "Rotomeca"));
-        Directory.CreateDirectory(Path.Combine(DossierProjets, ".cache"));
-        _configuration.Valeur = new ConfigurationNotes(DossierNotes, [DossierProjets]);
+        Directory.CreateDirectory(Path.Combine(DossierNotes, "projets"));
+        File.WriteAllText(Path.Combine(DossierNotes, "projets", "Xd.md"), "# Xd\n\n");
+        _configuration.Valeur = new ConfigurationNotes(DossierNotes);
     }
 
-    private string DossierNotes => Path.Combine(_racine, "notes");
-    private string DossierProjets => Path.Combine(_racine, "projets");
+    private string DossierNotes => Path.Combine(_racine.Chemin, "notes");
     private string General => Path.Combine(DossierNotes, "general.md");
 
-    public void Dispose() => Directory.Delete(_racine, recursive: true);
+    public void Dispose() => _racine.Dispose();
 
     private OutilNoterIdee Outil() => new(_configuration, new HorlogeFixe(new DateTimeOffset(2026, 10, 14, 10, 55, 0, TimeSpan.Zero)));
 
-    private static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement.Clone();
+    private IResult<IActionPreparee> Preparer(object parametres, params string[] paroles) =>
+        Outil().Preparer(JsonSerializer.SerializeToElement(parametres), new ContexteAppel(paroles[0]) { ReponsesUtilisateur = paroles[1..] });
 
-    private IResult<IActionPreparee> Preparer(string parametres, string phrase = PhraseGenerale) =>
-        Outil().Preparer(Json(parametres), new ContexteAppel(phrase));
+    private static IActionPreparee Action(IResult<IActionPreparee> resultat) =>
+        resultat.Match(Ok: a => a, Err: e => throw new Xunit.Sdk.XunitException(e.Message));
 
     private static string Erreur<T>(IResult<T> resultat) => resultat.Match(Ok: _ => "(succès)", Err: e => e.Message);
 
-    private async Task<string> Noter(string parametres, string phrase = PhraseGenerale)
+    private static async Task<string> Executer(IActionPreparee action) =>
+        (await action.ExecuterAsync(CancellationToken.None)).Match(Ok: t => t, Err: e => "ERREUR " + e.Message);
+
+    [Fact]
+    public async Task NotesGeneralesCitees_SontEcritesSansConfirmation()
     {
-        IActionPreparee action = Preparer(parametres, phrase).Match(Ok: a => a, Err: e => throw new Xunit.Sdk.XunitException(e.Message));
-        return (await action.ExecuterAsync(CancellationToken.None)).Match(Ok: t => t, Err: e => "ERREUR " + e.Message);
+        IActionPreparee action = Action(Preparer(new { texte = "revoir le prompt", destination = "general" }, "note dans les générales de revoir le prompt"));
+
+        Assert.False(action.ConfirmationRequise);
+        Assert.StartsWith($"Noté dans les notes générales, fichier : {General}.", await Executer(action));
+        Assert.Equal($"# general{Environment.NewLine}{Environment.NewLine}- 2026-10-14 10:55 — revoir le prompt{Environment.NewLine}", File.ReadAllText(General));
     }
 
     [Fact]
-    public async Task DestinationGenerale_VaDansLesNotesGenerales()
+    public async Task CarnetExistantCite_EstEcritSansConfirmation()
     {
-        Assert.Equal("Noté dans les notes générales.", await Noter("""{"texte":"revoir le prompt","destination":"general"}"""));
+        IActionPreparee action = Action(Preparer(new { texte = "mot d'éveil", destination = "xd" }, "note dans X D : mot d'éveil"));
 
-        Assert.Equal($"# general{Environment.NewLine}{Environment.NewLine}- 2026-10-14 10:55 — revoir le prompt{Environment.NewLine}",
-            File.ReadAllText(General));
+        Assert.False(action.ConfirmationRequise);
+        await Executer(action);
+        Assert.EndsWith($"- 2026-10-14 10:55 — mot d'éveil{Environment.NewLine}", File.ReadAllText(Path.Combine(DossierNotes, "projets", "Xd.md")));
     }
 
     [Fact]
-    public async Task DestinationProjet_VaDansLeFichierDuProjet()
+    public void DestinationNonCitee_ExigeUneConfirmationEtDitQuoiDemanderSiRefus()
     {
-        Assert.Equal("Noté dans les notes du projet Xd.", await Noter("""{"texte":"ajouter le mot d'éveil","destination":"Xd"}""", PhraseXd));
+        IActionPreparee action = Action(Preparer(new { texte = "faire un gratin", destination = "general" }, "note que je dois faire un gratin"));
 
-        Assert.Contains("ajouter le mot d'éveil", File.ReadAllText(Path.Combine(DossierNotes, "projets", "Xd.md")));
+        Assert.True(action.ConfirmationRequise);
+        Assert.Equal("Je note « faire un gratin » dans les notes générales. Je confirme ?", action.Reformulation);
+        Assert.Equal(["générales"], action.ElementsACiter);
+        Assert.Contains("carnet existant (Xd)", action.MessageSiRefus);
+    }
+
+    [Fact]
+    public void CarnetCiteDansUneReponseALaConfirmation_SePasseDeConfirmation()
+    {
+        IActionPreparee action = Action(Preparer(new { texte = "faire un gratin", destination = "Xd" }, "note que je dois faire un gratin", "oui mais dans Xd"));
+
+        Assert.False(action.ConfirmationRequise);
+    }
+
+    [Fact]
+    public async Task NouveauCarnetNomme_EstCreeApresConfirmation()
+    {
+        IActionPreparee action = Action(Preparer(new { texte = "acheter du terreau", destination = "Jardin" }, "note dans le carnet jardin d'acheter du terreau"));
+
+        Assert.True(action.ConfirmationRequise);
+        Assert.Equal("Je crée le carnet « Jardin » et j'y note « acheter du terreau ». Je confirme ?", action.Reformulation);
+        Assert.Equal(["Jardin"], action.ElementsACiter);
+
+        await Executer(action);
+        Assert.Contains("acheter du terreau", File.ReadAllText(Path.Combine(DossierNotes, "projets", "Jardin.md")));
+    }
+
+    [Theory]
+    [InlineData("Courses")]
+    [InlineData("Jardin")]
+    public void NouveauCarnetQueLUtilisateurNAPasNomme_EstRefuse(string destination)
+    {
+        IResult<IActionPreparee> resultat = Preparer(new { texte = "x", destination }, "note que je dois acheter du pain");
+
+        Assert.False(resultat.IsSuccess);
+        Assert.Contains("Ne choisis pas le nom à sa place", Erreur(resultat));
+    }
+
+    [Theory]
+    [InlineData("../evade")]
+    [InlineData("C:")]
+    [InlineData("NUL")]
+    [InlineData(".cache")]
+    public void NomDeCarnetDangereux_EstRefuseMemeSiLUtilisateurLeDit(string destination)
+    {
+        Assert.False(Preparer(new { texte = "x", destination }, $"note dans {destination}").IsSuccess);
     }
 
     [Fact]
@@ -67,8 +114,8 @@ public sealed class OutilNoterIdeeTests : IDisposable
         const string existant = "# general\n\nContenu écrit à la main, à ne jamais perdre.\n";
         File.WriteAllText(General, existant);
 
-        await Noter("""{"texte":"première","destination":"general"}""");
-        await Noter("""{"texte":"seconde","destination":"general"}""");
+        await Executer(Action(Preparer(new { texte = "première", destination = "general" }, "dans les générales")));
+        await Executer(Action(Preparer(new { texte = "seconde", destination = "general" }, "dans les générales")));
 
         string contenu = File.ReadAllText(General);
         Assert.StartsWith(existant, contenu);
@@ -78,66 +125,28 @@ public sealed class OutilNoterIdeeTests : IDisposable
     [Fact]
     public async Task TexteSurPlusieursLignes_DevientUneSeuleLigne()
     {
-        await Noter("""{"texte":"ligne un\n# pas un titre\r\nligne\ttrois","destination":"general"}""");
+        await Executer(Action(Preparer(new { texte = "ligne un\n# pas un titre\r\nligne\ttrois", destination = "general" }, "dans les générales")));
 
         Assert.EndsWith($"— ligne un # pas un titre ligne trois{Environment.NewLine}", File.ReadAllText(General));
     }
 
     [Theory]
-    [InlineData("note que je dois faire un gratin de pâtes", "general")]
-    [InlineData("note que je dois faire un gratin de pâtes", "Xd")]
-    [InlineData("note pour Rotomeca que je dois relire la doc", "Xd")]
-    [InlineData("note que je dois installer xdebug", "Xd")]
-    public void DestinationNonCiteeParLUtilisateur_EstRefuseePourQueLeModeleDemande(string phrase, string destination)
-    {
-        IResult<IActionPreparee> resultat = Preparer(JsonSerializer.Serialize(new { texte = "x", destination }), phrase);
-
-        Assert.False(resultat.IsSuccess);
-        Assert.Contains("Demande-lui : dans les notes générales ou dans un projet (Rotomeca, Xd) ?", Erreur(resultat));
-    }
-
-    [Theory]
-    [InlineData("dans les générales", "general")]
-    [InlineData("mets ça dans mes notes generales", "general")]
-    [InlineData("sans projet", "general")]
-    [InlineData("dans Xd.", "Xd")]
-    [InlineData("pour le projet XD", "Xd")]
-    [InlineData("rotomeca", "Rotomeca")]
-    public void DestinationCiteeParLUtilisateur_EstAcceptee(string phrase, string destination)
-    {
-        Assert.True(Preparer(JsonSerializer.Serialize(new { texte = "x", destination }), phrase).IsSuccess);
-    }
-
-    [Theory]
-    [InlineData("""{"texte":"x","destination":"Inconnu"}""")]
-    [InlineData("""{"texte":"x","destination":"xd"}""")]
-    [InlineData("""{"texte":"x","destination":".cache"}""")]
-    [InlineData("""{"texte":"x","destination":"../notes"}""")]
-    [InlineData("""{"texte":"x","destination":3}""")]
-    [InlineData("""{"texte":"x"}""")]
-    public void DestinationHorsListe_EstRefuseeEnDonnantLesChoix(string parametres)
-    {
-        IResult<IActionPreparee> resultat = Preparer(parametres, "note ça pour xd, .cache, ../notes, inconnu");
-
-        Assert.False(resultat.IsSuccess);
-        Assert.Contains("Rotomeca, Xd", Erreur(resultat));
-    }
-
-    [Theory]
     [InlineData("""{"destination":"general"}""")]
+    [InlineData("""{"texte":"x"}""")]
+    [InlineData("""{"texte":"x","destination":"  "}""")]
     [InlineData("""{"texte":"   ","destination":"general"}""")]
     [InlineData("""{"texte":42,"destination":"general"}""")]
     [InlineData("""{"texte":"x","destination":"general","fichier":"C:\\Windows\\win.ini"}""")]
     [InlineData("""["x"]""")]
     public void ParametresMalFormes_SontRefuses(string parametres)
     {
-        Assert.False(Preparer(parametres).IsSuccess);
+        Assert.False(Outil().Preparer(JsonDocument.Parse(parametres).RootElement, new ContexteAppel("dans les générales")).IsSuccess);
     }
 
     [Fact]
     public void NoteTropLongue_EstRefusee()
     {
-        Assert.False(Preparer(JsonSerializer.Serialize(new { texte = new string('a', OutilNoterIdee.LongueurMax + 1), destination = "general" })).IsSuccess);
+        Assert.False(Preparer(new { texte = new string('a', OutilNoterIdee.LongueurMax + 1), destination = "general" }, "dans les générales").IsSuccess);
     }
 
     [Fact]
@@ -145,7 +154,7 @@ public sealed class OutilNoterIdeeTests : IDisposable
     {
         _configuration.Valeur = ConfigurationNotes.Vide;
 
-        IResult<IActionPreparee> resultat = Preparer("""{"texte":"x","destination":"general"}""");
+        IResult<IActionPreparee> resultat = Preparer(new { texte = "x", destination = "general" }, "dans les générales");
 
         Assert.False(resultat.IsSuccess);
         Assert.Contains("configurer_notes", Erreur(resultat));
@@ -154,7 +163,7 @@ public sealed class OutilNoterIdeeTests : IDisposable
     [Fact]
     public void Preparer_NEcritRien()
     {
-        Preparer("""{"texte":"x","destination":"general"}""");
+        Preparer(new { texte = "x", destination = "general" }, "dans les générales");
 
         Assert.False(File.Exists(General));
     }
@@ -162,56 +171,25 @@ public sealed class OutilNoterIdeeTests : IDisposable
     [Fact]
     public async Task DossierDeNotesDisparu_RenvoieUneErreurSansLeRecreer()
     {
-        IActionPreparee action = Preparer("""{"texte":"x","destination":"general"}""").Match(Ok: a => a, Err: e => throw new Xunit.Sdk.XunitException(e.Message));
+        IActionPreparee action = Action(Preparer(new { texte = "x", destination = "general" }, "dans les générales"));
         Directory.Delete(DossierNotes, recursive: true);
 
-        IResult<string> resultat = await action.ExecuterAsync(CancellationToken.None);
-
-        Assert.False(resultat.IsSuccess);
-        Assert.Contains("introuvable", Erreur(resultat));
+        Assert.Contains("introuvable", await Executer(action));
         Assert.False(Directory.Exists(DossierNotes));
     }
 
     [Fact]
-    public void Schema_ProposeGeneralPuisLesProjetsEtSuitLesNouveauxDossiers()
+    public void Schema_ListeLesCarnetsExistantsEtSuitLesNouveaux()
     {
         OutilNoterIdee outil = Outil();
-        Assert.Equal(["general", "Rotomeca", "Xd"], Destinations(outil.SchemaParametres));
+        Assert.Contains("Carnets existants : general, Xd.", Description(outil));
 
-        Directory.CreateDirectory(Path.Combine(DossierProjets, "Atelier"));
+        File.WriteAllText(Path.Combine(DossierNotes, "projets", "Atelier.md"), "");
 
-        Assert.Equal(["general", "Atelier", "Rotomeca", "Xd"], Destinations(outil.SchemaParametres));
+        Assert.Contains("Carnets existants : general, Atelier, Xd.", Description(outil));
         Assert.Equal(["texte", "destination"], outil.SchemaParametres.GetProperty("required").EnumerateArray().Select(e => e.GetString()));
     }
 
-    [Fact]
-    public void SansDossierDeProjets_SeuleLaDestinationGeneraleEstProposee()
-    {
-        _configuration.Valeur = new ConfigurationNotes(DossierNotes, []);
-
-        Assert.Equal(["general"], Destinations(Outil().SchemaParametres));
-    }
-
-    private static List<string?> Destinations(JsonElement schema) =>
-        [.. schema.GetProperty("properties").GetProperty("destination").GetProperty("enum").EnumerateArray().Select(e => e.GetString())];
-
-    private sealed class ConfigurationEnMemoire : IStockageConfigurationNotes
-    {
-        public ConfigurationNotes Valeur { get; set; } = ConfigurationNotes.Vide;
-
-        public IResult<ConfigurationNotes> Lire() => Result.Ok(Valeur);
-
-        public IResult<bool> Ecrire(ConfigurationNotes configuration)
-        {
-            Valeur = configuration;
-            return Result.Ok(true);
-        }
-    }
-
-    private sealed class HorlogeFixe(DateTimeOffset maintenant) : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow() => maintenant;
-
-        public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
-    }
+    private static string Description(OutilNoterIdee outil) =>
+        outil.SchemaParametres.GetProperty("properties").GetProperty("destination").GetProperty("description").GetString() ?? string.Empty;
 }
