@@ -5,6 +5,7 @@ using Xd.Core.Permissions;
 using Xd.Local.Installation;
 using Xd.Local.Serveur;
 using Xd.Tools.EtatMachine;
+using Xd.Tools.Notes;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 Console.InputEncoding = System.Text.Encoding.UTF8;
@@ -20,6 +21,12 @@ await using ServiceProvider services = new ServiceCollection()
         : throw new PlatformNotSupportedException("Xd fonctionne sous Windows et Linux."))
     .AddSingleton<ISourceConteneurs, ConteneursDocker>()
     .AddSingleton<IOutil, OutilEtatMachine>()
+    .AddSingleton(TimeProvider.System)
+    .AddSingleton<IStockageConfigurationNotes>(fournisseur =>
+        new FichierConfigurationNotes(Path.Combine(fournisseur.GetRequiredService<EmplacementsXd>().Configuration, "notes.json")))
+    .AddSingleton(LecturePhraseChemin.Plateforme())
+    .AddSingleton<IOutil, OutilNoterIdee>()
+    .AddSingleton<IOutil, OutilConfigurerNotes>()
     .AddSingleton<IMesureMemoireVideo, MesureNvidiaSmi>()
     .AddSingleton<IInteractionInstallation, InteractionConsole>()
     // Téléchargements de plusieurs gigaoctets : pas de délai global, Ctrl+C pour interrompre.

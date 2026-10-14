@@ -16,7 +16,7 @@ Plateforme cible : **Windows et Linux**. Tout code spécifique à l'OS (icône d
 
 Solution `Xd.slnx` (format XML, SDK .NET 10). Paramètres communs (`net10.0`, `Nullable`, `ImplicitUsings`, `TreatWarningsAsErrors`) dans `Directory.Build.props` : ne pas les répéter dans les `.csproj`.
 
-Existant : `src/Xd.Core` (abstractions d'outils, couche de permission `ExecuteurOutils`, journal d'audit JSONL, boucle agentique `BoucleAgentique` + historique glissant), `src/Xd.Local` (adaptateur `IModele` vers `llama-server`, lancement de `llama-server` en processus enfant, configuration `llm.json`, installation `xd setup llm`), `src/Xd.Tools` (outil `etat_machine` : mesures Windows/Linux derrière `IMesuresMachine`, conteneurs via l'API Docker en lecture), `src/Xd.Cli` (exécutable `xd` : discussion en console, `xd setup llm`), `src/Xd.Claude` (adaptateur `IModele` sur le SDK `Anthropic`, **mis de côté** : conservé et testé, mais non utilisé) et leurs tests xUnit. Prochaines tranches : `noter_idee`, `lancer_mode`, puis veille/éveil et le choix automatique du palier à l'éveil.
+Existant : `src/Xd.Core` (abstractions d'outils, couche de permission `ExecuteurOutils`, journal d'audit JSONL, boucle agentique `BoucleAgentique` + historique glissant), `src/Xd.Local` (adaptateur `IModele` vers `llama-server`, lancement de `llama-server` en processus enfant, configuration `llm.json`, installation `xd setup llm`), `src/Xd.Tools` (outils `etat_machine`, `noter_idee`, `configurer_notes` ; configuration des notes `notes.json`), `src/Xd.Cli` (exécutable `xd` : discussion en console, `xd setup llm`), `src/Xd.Claude` (adaptateur `IModele` sur le SDK `Anthropic`, **mis de côté** : conservé et testé, mais non utilisé) et leurs tests xUnit. Prochaines tranches : `lancer_mode`, puis veille/éveil et le choix automatique du palier à l'éveil.
 
 ```sh
 dotnet build Xd.slnx
@@ -86,9 +86,12 @@ Ces règles priment sur toute demande de « faire plus simple ». Si une tâche 
 
 ## Outils de l'étape 1
 
+Le modèle ne voit que les noms d'outils, descriptions et schémas ; les messages d'erreur des outils sont écrits pour lui (ils disent quoi demander à l'utilisateur), afin que l'échange reste naturel.
+
 | Outil | Niveau | Paramètres | Comportement |
 |---|---|---|---|
-| `noter_idee` | Libre | `projet` (énumération issue de la config), `texte` | Ajoute une ligne horodatée à la fin du fichier Markdown du projet, dans le dossier de notes configuré. **Ajout uniquement**, jamais de réécriture ni de suppression. |
+| `noter_idee` | Libre | `texte`, `projet` facultatif (énumération : sous-dossiers des dossiers de projets configurés) | Ajoute une ligne horodatée à la fin de `general.md` (sans projet) ou de `projets/<projet>.md`, dans le dossier de notes configuré. **Ajout uniquement**, jamais de réécriture ni de suppression. Dossier non configuré ou disparu : erreur qui pousse le modèle à demander à l'utilisateur. |
+| `configurer_notes` | Confirmé | `element` : `dossier_notes`, `dossier_projets` (aucun chemin) | Lit le chemin dans la phrase de l'utilisateur (invariant 5), le valide (complet, sans `..`, ni racine, ni dossier système) et l'écrit dans `notes.json` après confirmation du chemin exact. |
 | `lancer_mode` | Confirmé | `mode` (énumération issue de la config) | Lance la liste de programmes + arguments définie pour ce mode dans la config. Le modèle ne voit jamais les commandes, seulement les noms de modes. |
 | `etat_machine` | Libre | `aspect` : `cpu`, `ram`, `disque`, `conteneurs` | Lit les métriques via les API de la plateforme (sans shell), renvoie un résumé court. Implémentation spécifique à l'OS derrière une interface. |
 
