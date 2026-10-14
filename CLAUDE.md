@@ -2,24 +2,26 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-# Jarvis — assistant vocal de bureau basé sur Claude
+# Xd — assistant vocal de bureau basé sur Claude
 
 Assistant personnel qui agit sur le PC à partir de commandes vocales, avec un petit compagnon animé à l'écran. Claude (via l'API) sert de « cerveau » : il **demande** des actions, l'orchestrateur **décide** de les exécuter ou non.
 
 Langue du projet : **français** (commentaires, docs, messages de commit, réponses de l'assistant).
 
-<!-- TODO Tommy : plateforme cible (Windows seul ? Linux seul ? les deux ?) — conditionne la bibliothèque d'icône de notification et l'implémentation d'etat_machine -->
-Plateforme cible : **à préciser**. Tant que ce n'est pas tranché, isoler tout code spécifique à l'OS derrière une interface.
+Nom du projet : **Xd** (« Jarvis » n'est qu'une image pour se donner l'idée ; ne pas l'utiliser dans le code).
+
+Plateforme cible : **Windows et Linux**. Tout code spécifique à l'OS (icône de notification, métriques d'`etat_machine`, lancement de programmes) vit derrière une interface, avec une implémentation par OS ; `Xd.Core` reste indépendant de l'OS.
 
 ## État actuel du dépôt et commandes
 
-Le dépôt n'est encore qu'un squelette : un seul projet console `Xd.csproj` (`net10.0`, `ImplicitUsings` et `Nullable` activés) dont `Program.cs` affiche « Hello, World! », référencé par la solution `Xd.slnx` (format XML, nécessite un SDK .NET récent ; SDK 10 installé). Aucun projet de test et pas encore de dépôt git. La structure `src/Jarvis.*` décrite plus bas est une **cible**, pas l'existant : la créer au fil des tranches.
+Solution `Xd.slnx` (format XML, SDK .NET 10). Paramètres communs (`net10.0`, `Nullable`, `ImplicitUsings`, `TreatWarningsAsErrors`) dans `Directory.Build.props` : ne pas les répéter dans les `.csproj`.
+
+Existant : `src/Xd.Core` (abstractions d'outils, couche de permission `ExecuteurOutils`, journal d'audit JSONL) et `tests/Xd.Core.Tests` (xUnit). Pas encore de point d'entrée exécutable : `Xd.Cli` arrivera avec la boucle agentique.
 
 ```sh
-dotnet build Xd.slnx                      # compiler
-dotnet run --project Xd.csproj            # lancer
-dotnet test Xd.slnx                       # tests (une fois un projet de test ajouté à la solution)
-dotnet test Xd.slnx --filter "FullyQualifiedName~NomDuTest"   # un seul test
+dotnet build Xd.slnx
+dotnet test Xd.slnx
+dotnet test Xd.slnx --filter "FullyQualifiedName~ExecuteurOutilsTests"   # une classe ou un test précis
 ```
 
 ## Feuille de route
@@ -59,8 +61,9 @@ Trois blocs, découplés par interfaces :
 
 Une **machine à états** centrale est la source de vérité : `Veille` au-dessus de tout, puis à l'éveil `Repos → Ecoute → Reflexion → Parle → Erreur`. L'icône, le compagnon et l'audio s'y abonnent.
 
-<!-- TODO Tommy : ajuster le découpage en projets de la solution si besoin -->
-Structure de solution proposée : `src/Jarvis.Core` (boucle, permissions, états, abstractions), `src/Jarvis.Tools` (implémentations des outils), `src/Jarvis.Host` (icône de notification, cycle de vie des processus enfants), `src/Jarvis.Cli` (entrée console de l'étape 1), `tests/…`.
+Structure de solution : `src/Xd.Core` (boucle, permissions, états, abstractions), `src/Xd.Tools` (implémentations des outils), `src/Xd.Host` (icône de notification, cycle de vie des processus enfants), `src/Xd.Cli` (entrée console de l'étape 1), `tests/Xd.*.Tests`. Créer chaque projet seulement quand une tranche en a besoin.
+
+Contrat d'un outil (`Xd.Core.Outils`) : `IOutil.Preparer(JsonElement)` valide les paramètres et renvoie une `IActionPreparee` (ou une erreur Rop) **sans rien exécuter** ; l'action porte une `Reformulation` construite à partir des paramètres validés (c'est la question de confirmation) et `ExecuterAsync`. `ExecuteurOutils` est le seul à enchaîner validation → confirmation → audit → exécution ; il écrit le journal avec `CancellationToken.None` (un refus pour cause de veille doit être journalisé) et n'exécute rien si une entrée d'audit ne peut pas être écrite avant l'exécution.
 
 ## Invariants de sécurité — NON NÉGOCIABLES
 
@@ -75,7 +78,7 @@ Ces règles priment sur toute demande de « faire plus simple ». Si une tâche 
 7. **Itérations plafonnées** : au maximum 10 allers-retours d'outils par demande utilisateur, puis arrêt avec un message.
 8. **Journal d'audit** : chaque appel d'outil (demandé, confirmé/refusé, exécuté, résultat) est écrit en JSONL avec horodatage, nom de l'outil, paramètres et demande utilisateur d'origine.
 9. **Secrets** : la clé API vient de la variable d'environnement `ANTHROPIC_API_KEY`. Jamais de secret en dur, dans un fichier commité ou dans les logs.
-10. **Configuration des modes hors dépôt.** Le vrai fichier des modes vit dans le dossier de configuration utilisateur de la plateforme (`Environment.SpecialFolder.ApplicationData`/`jarvis`) et n'est **jamais modifié par Claude Code**. Le dépôt ne contient qu'un fichier d'exemple.
+10. **Configuration des modes hors dépôt.** Le vrai fichier des modes vit dans le dossier de configuration utilisateur de la plateforme (`Environment.SpecialFolder.ApplicationData`/`xd`) et n'est **jamais modifié par Claude Code**. Le dépôt ne contient qu'un fichier d'exemple.
 11. **La veille est un arrêt réel.** En veille : processus enfants terminés, micro libéré, aucun appel réseau à l'API. Aucun composant ne « continue un peu » en arrière-plan.
 12. **Les interventions spontanées n'agissent jamais.** Une prise de parole à l'initiative de l'assistant n'a accès à aucun outil à niveau `Confirme`, au mieux aux outils `Libre` en lecture. Elle peut *proposer* une action ; rien ne s'exécute sans une demande explicite de l'utilisateur, qui repasse alors par la boucle normale. Le contexte envoyé à Claude ne contient jamais de capture ni de contenu d'écran.
 
@@ -106,8 +109,8 @@ Deux niveaux : comportements locaux du compagnon sans appel à Claude (animation
 
 Utiliser l'écosystème **Rotomeca** (NuGet, espace de noms `Rotomeca.*`) plutôt que des équivalents maison ou tiers :
 
-- `Rotomeca.Core` : méta-package, à référencer par défaut.
-- `Rotomeca.Rop` : gestion d'erreurs orientée rail (Railway Oriented Programming), avec son générateur de sources pour `[Risky]`. **C'est le mécanisme d'erreur du projet** : les outils, la couche de permission et la boucle renvoient des résultats Rop plutôt que de lever des exceptions. Les exceptions des bibliothèques externes (SDK, `Process`, I/O) sont converties en résultats à la frontière.
+- `Rotomeca.Core` : méta-package, à référencer par défaut. **Attention** : il n'embarque que `Core.Collections` et `Core.Optionals` ; `Rotomeca.Rop` et `Rotomeca.Utils` doivent être référencés séparément.
+- `Rotomeca.Rop` : gestion d'erreurs orientée rail (Railway Oriented Programming). Le générateur `[Risky]` décrit dans son README **n'est pas livré dans le package 1.0.0** : convertir les exceptions à la main (`try`/`catch` à la frontière, `Result.Try`, `ResultAsync.TryAsync`). Une opération sans valeur renvoie `IResult<bool>` (`true` en succès), comme `Result.Try(Action)`. **C'est le mécanisme d'erreur du projet** : les outils, la couche de permission et la boucle renvoient des résultats Rop plutôt que de lever des exceptions. Les exceptions des bibliothèques externes (SDK, `Process`, I/O) sont converties en résultats à la frontière.
 - `Rotomeca.Core.Optionals` : `MayBe<T>` pour exprimer l'absence de valeur, plutôt que `null`.
 - `Rotomeca.Core.Collections` : `RArray<T>` quand c'est pertinent.
 - `Rotomeca.Utils` : utilitaires divers, à vérifier avant d'écrire un helper.
@@ -129,5 +132,5 @@ Utiliser l'écosystème **Rotomeca** (NuGet, espace de noms `Rotomeca.*`) plutô
 - **Petites tranches vérifiables** : une brique par tâche (ex. interface d'outil + couche de permission, puis la boucle, puis un outil à la fois). Proposer un plan avant de coder.
 - **Tests obligatoires** pour la couche de permission, les outils et les transitions veille/éveil, au minimum : confirmation refusée, valeur hors énumération, mode inconnu, plafond d'itérations atteint, écriture de note en ajout seul, mise en veille pendant une confirmation en attente.
 - **Commits** : Conventional Commits + gitmoji, en français, un commit par tranche.
-- Dépendances : les packages `Rotomeca.*` et `Anthropic` sont autorisés. Toute autre dépendance NuGet doit être signalée et justifiée avant ajout.
+- Dépendances : les packages `Rotomeca.*`, `Anthropic`, xUnit (+ SDK de test), `Microsoft.Extensions.DependencyInjection` et `Microsoft.Extensions.Hosting` sont autorisés. Toute autre dépendance NuGet doit être signalée et justifiée avant ajout.
 - En cas de doute sur un invariant de sécurité : demander, ne pas trancher seul.

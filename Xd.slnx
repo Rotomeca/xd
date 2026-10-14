@@ -1,3 +1,8 @@
 <Solution>
-  <Project Path="Xd.csproj" />
+  <Folder Name="/src/">
+    <Project Path="src/Xd.Core/Xd.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Xd.Core.Tests/Xd.Core.Tests.csproj" />
+  </Folder>
 </Solution>
