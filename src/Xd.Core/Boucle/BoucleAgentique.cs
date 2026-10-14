@@ -111,7 +111,8 @@ public sealed class BoucleAgentique
 
     private static string ConclureAvecTexte(List<Message> tour, ReponseModele reponse)
     {
-        string texte = string.Join(" ", reponse.Blocs.OfType<BlocTexte>().Select(b => b.Texte.Trim()).Where(t => t.Length > 0));
+        // Nettoyé avant d'entrer dans l'historique : le modèle ne reprend pas ensuite des emojis qu'il ne voit plus.
+        string texte = NettoyageSortie.PourLaVoix(string.Join(" ", reponse.Blocs.OfType<BlocTexte>().Select(b => b.Texte)));
         return Conclure(tour, texte.Length > 0 ? texte : MessageVide);
     }
 
