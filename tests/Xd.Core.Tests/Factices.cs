@@ -19,6 +19,9 @@ internal sealed class OutilFactice : IOutil
         _preparer = preparer;
     }
 
+    /// <summary>Contextes reçus, un par préparation.</summary>
+    public List<ContexteAppel> Contextes { get; } = [];
+
     public OutilFactice(string nom, NiveauOutil niveau, IActionPreparee action)
         : this(nom, niveau, _ => Result.Ok(action))
     {
@@ -26,10 +29,14 @@ internal sealed class OutilFactice : IOutil
 
     public string Nom { get; }
     public string Description => "Outil de test";
-    public JsonElement SchemaParametres { get; } = JsonDocument.Parse("""{"type":"object"}""").RootElement;
+    public JsonElement SchemaParametres { get; set; } = JsonDocument.Parse("""{"type":"object"}""").RootElement;
     public NiveauOutil Niveau { get; }
 
-    public IResult<IActionPreparee> Preparer(JsonElement parametres) => _preparer(parametres);
+    public IResult<IActionPreparee> Preparer(JsonElement parametres, ContexteAppel contexte)
+    {
+        Contextes.Add(contexte);
+        return _preparer(parametres);
+    }
 }
 
 internal sealed class ActionFactice : IActionPreparee

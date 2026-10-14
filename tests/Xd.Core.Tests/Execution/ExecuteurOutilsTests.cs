@@ -209,6 +209,41 @@ public sealed class ExecuteurOutilsTests
     }
 
     [Fact]
+    public async Task Preparer_RecoitLaPhraseDeLUtilisateur()
+    {
+        var outil = new OutilFactice("etat_machine", NiveauOutil.Libre, new ActionFactice("Lire la RAM", "RAM : 40 %"));
+        var executeur = Executeur(new ConfirmateurFactice(true), outil);
+
+        await executeur.ExecuterAsync(Appel("etat_machine"), CancellationToken.None);
+
+        Assert.Equal([new ContexteAppel("lance le mode jeu")], outil.Contextes);
+    }
+
+    [Fact]
+    public void Definitions_SontReluesAChaqueAcces()
+    {
+        var outil = new OutilFactice("noter_idee", NiveauOutil.Libre, new ActionFactice("x", "x"));
+        var executeur = Executeur(new ConfirmateurFactice(true), outil);
+        _ = executeur.Definitions;
+
+        outil.SchemaParametres = JsonDocument.Parse("""{"type":"object","properties":{"projet":{"enum":["Xd"]}}}""").RootElement;
+
+        Assert.True(executeur.Definitions[0].SchemaParametres.TryGetProperty("properties", out _));
+    }
+
+    [Fact]
+    public void Definitions_GardentLOrdreDEnregistrement()
+    {
+        var action = new ActionFactice("x", "x");
+        var executeur = Executeur(new ConfirmateurFactice(true),
+            new OutilFactice("noter_idee", NiveauOutil.Libre, action),
+            new OutilFactice("etat_machine", NiveauOutil.Libre, action),
+            new OutilFactice("lancer_mode", NiveauOutil.Confirme, action));
+
+        Assert.Equal(["noter_idee", "etat_machine", "lancer_mode"], executeur.Definitions.Select(d => d.Nom));
+    }
+
+    [Fact]
     public void DeuxOutilsDeMemeNom_SontRefusesALaConstruction()
     {
         var action = new ActionFactice("x", "x");

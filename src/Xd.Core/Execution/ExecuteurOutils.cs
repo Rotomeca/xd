@@ -19,6 +19,7 @@ namespace Xd.Core.Execution;
 public sealed class ExecuteurOutils
 {
     private readonly IReadOnlyDictionary<string, IOutil> _outils;
+    private readonly IReadOnlyList<IOutil> _ordre;
     private readonly IConfirmateur _confirmateur;
     private readonly IJournalAudit _journal;
     private readonly TimeProvider _horloge;
@@ -26,27 +27,31 @@ public sealed class ExecuteurOutils
     public ExecuteurOutils(IEnumerable<IOutil> outils, IConfirmateur confirmateur, IJournalAudit journal, TimeProvider horloge)
     {
         var parNom = new Dictionary<string, IOutil>(StringComparer.Ordinal);
-        var definitions = new List<DefinitionOutil>();
+        var ordre = new List<IOutil>();
         foreach (IOutil outil in outils)
         {
             if (!parNom.TryAdd(outil.Nom, outil))
                 throw new ArgumentException($"Deux outils portent le nom « {outil.Nom} ».", nameof(outils));
 
-            definitions.Add(new DefinitionOutil(outil.Nom, outil.Description, outil.SchemaParametres));
+            ordre.Add(outil);
         }
 
         _outils = parNom;
-        Definitions = definitions;
+        _ordre = ordre;
         _confirmateur = confirmateur;
         _journal = journal;
         _horloge = horloge;
     }
 
-    /// <summary>Outils exposés à Claude : exactement ceux que cet exécuteur sait traiter.</summary>
-    public IReadOnlyList<DefinitionOutil> Definitions { get; }
+    /// <summary>
+    /// Outils exposés au modèle : exactement ceux que cet exécuteur sait traiter, dans un ordre fixe.
+    /// Recalculés à chaque lecture, car un schéma peut dépendre de la configuration.
+    /// </summary>
+    public IReadOnlyList<DefinitionOutil> Definitions =>
+        [.. _ordre.Select(o => new DefinitionOutil(o.Nom, o.Description, o.SchemaParametres))];
 
     /// <summary>Traite une demande d'outil de bout en bout.</summary>
-    /// <param name="appel">Demande émise par Claude.</param>
+    /// <param name="appel">Demande émise par le modèle.</param>
     /// <param name="annulation">Annule la confirmation en attente ou l'action en cours.</param>
     public async Task<ResultatOutil> ExecuterAsync(AppelOutil appel, CancellationToken annulation)
     {
@@ -65,7 +70,7 @@ public sealed class ExecuteurOutils
     {
         try
         {
-            return outil.Preparer(appel.Parametres);
+            return outil.Preparer(appel.Parametres, new ContexteAppel(appel.DemandeUtilisateur));
         }
         catch (Exception ex)
         {

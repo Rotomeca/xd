@@ -62,7 +62,7 @@ public sealed class OutilEtatMachine : IOutil
     public NiveauOutil Niveau => NiveauOutil.Libre;
 
     /// <inheritdoc/>
-    public IResult<IActionPreparee> Preparer(JsonElement parametres)
+    public IResult<IActionPreparee> Preparer(JsonElement parametres, ContexteAppel contexte)
     {
         if (parametres.ValueKind != JsonValueKind.Object)
             return Invalide("les paramètres doivent être un objet JSON.");

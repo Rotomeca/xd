@@ -13,13 +13,15 @@ public sealed class OutilEtatMachineTests
     private readonly MesuresFactices _mesures = new();
     private readonly ConteneursFactices _conteneurs = new();
 
+    private static readonly ContexteAppel Contexte = new("et la RAM ?");
+
     private OutilEtatMachine Outil() => new(_mesures, _conteneurs);
 
     private static JsonElement Json(string json) => JsonDocument.Parse(json).RootElement.Clone();
 
     private async Task<string> Executer(string parametres)
     {
-        IActionPreparee action = Outil().Preparer(Json(parametres)).Match(Ok: a => a, Err: e => throw new Xunit.Sdk.XunitException(e.Message));
+        IActionPreparee action = Outil().Preparer(Json(parametres), Contexte).Match(Ok: a => a, Err: e => throw new Xunit.Sdk.XunitException(e.Message));
         IResult<string> resultat = await action.ExecuterAsync(CancellationToken.None);
         return resultat.Match(Ok: texte => texte, Err: e => "ERREUR " + e.Message);
     }
@@ -43,7 +45,7 @@ public sealed class OutilEtatMachineTests
     [InlineData("""{"aspect":""}""")]
     public void ValeurHorsEnumeration_EstRefusee(string parametres)
     {
-        IResult<IActionPreparee> resultat = Outil().Preparer(Json(parametres));
+        IResult<IActionPreparee> resultat = Outil().Preparer(Json(parametres), Contexte);
 
         Assert.False(resultat.IsSuccess);
         Assert.Contains("cpu, ram, disque, conteneurs", resultat.Match(Ok: _ => string.Empty, Err: e => e.Message));
@@ -58,13 +60,13 @@ public sealed class OutilEtatMachineTests
     [InlineData("\"cpu\"")]
     public void ParametresMalFormes_SontRefuses(string parametres)
     {
-        Assert.False(Outil().Preparer(Json(parametres)).IsSuccess);
+        Assert.False(Outil().Preparer(Json(parametres), Contexte).IsSuccess);
     }
 
     [Fact]
     public void Preparer_NeMesureRien()
     {
-        Outil().Preparer(Json("""{"aspect":"cpu"}"""));
+        Outil().Preparer(Json("""{"aspect":"cpu"}"""), Contexte);
 
         Assert.Equal(0, _mesures.Appels);
     }
@@ -74,7 +76,7 @@ public sealed class OutilEtatMachineTests
     [InlineData("conteneurs", "Je regarde les conteneurs en marche.")]
     public void Reformulation_DecritLAspectValide(string aspect, string attendue)
     {
-        IActionPreparee action = Outil().Preparer(Json($$"""{"aspect":"{{aspect}}"}""")).Match(Ok: a => a, Err: e => throw new Xunit.Sdk.XunitException(e.Message));
+        IActionPreparee action = Outil().Preparer(Json($$"""{"aspect":"{{aspect}}"}"""), Contexte).Match(Ok: a => a, Err: e => throw new Xunit.Sdk.XunitException(e.Message));
 
         Assert.Equal(attendue, action.Reformulation);
     }
