@@ -24,6 +24,9 @@ public sealed class LecturePhraseChemin
     private static readonly Regex CheminWindows = new(@"(?<![\w])[A-Za-z]:[\\/][^\r\n""«»“”]*");
     private static readonly Regex CheminUnix = new(@"(?<![\w:~/])(?:~[\\/]|/)[^\r\n""«»“”]*");
     private static readonly Regex DebutDeChemin = new(@"^(?:[A-Za-z]:[\\/]|~[\\/]|/)");
+    private static readonly Regex SousDossier = new(
+        @"(?:sous[- ]?dossier|sous[- ]?r[ée]pertoire|dossier|r[ée]pertoire)\s+(?:nomm[ée]\s+|appel[ée]\s+)?[«""“]?\s*([^\s,.;!?«»""”\\/]+)",
+        RegexOptions.IgnoreCase);
     private static readonly char[] PonctuationFinale = ['.', ',', ';', '!', '?', ')', ' ', '\t'];
 
     private readonly string _documents;
@@ -67,8 +70,19 @@ public sealed class LecturePhraseChemin
             return Delimiter(Developper(absolu.Value));
 
         string minuscules = phrase.ToLowerInvariant();
-        bool motCle = minuscules.Contains("par défaut") || minuscules.Contains("par defaut") || minuscules.Contains("mes documents");
-        return element == ElementNotes.DossierNotes && motCle ? DossierNotesParDefaut : MayBe<string>.Null;
+        if (element != ElementNotes.DossierNotes)
+            return MayBe<string>.Null;
+
+        // « dans mes documents, sous-dossier TEST » : sous-dossier nommé des Documents.
+        if (minuscules.Contains("mes documents"))
+        {
+            Match sousDossier = SousDossier.Match(phrase);
+            return sousDossier.Success && CatalogueProjets.EstNomValide(sousDossier.Groups[1].Value)
+                ? Path.Combine(_documents, sousDossier.Groups[1].Value)
+                : DossierNotesParDefaut;
+        }
+
+        return minuscules.Contains("par défaut") || minuscules.Contains("par defaut") ? DossierNotesParDefaut : MayBe<string>.Null;
     }
 
     /// <summary>Vérifie qu'un chemin est acceptable pour l'élément demandé et le normalise.</summary>

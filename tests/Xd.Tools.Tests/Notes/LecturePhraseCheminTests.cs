@@ -44,6 +44,24 @@ public sealed class LecturePhraseCheminTests
     }
 
     [Theory]
+    [InlineData("dans mes documents, sous dossier TEST", "TEST")]
+    [InlineData("dans mes documents, sous-dossier « Idées »", "Idées")]
+    [InlineData("Mets-les dans mes documents dans un dossier nommé Notes.", "Notes")]
+    [InlineData("dans mes documents, répertoire perso_2", "perso_2")]
+    public void MesDocumentsAvecSousDossier_DonneCeSousDossier(string phrase, string sousDossier)
+    {
+        Assert.Equal(Path.Combine(Documents, sousDossier), Extraire(Lecture(), phrase));
+    }
+
+    [Theory]
+    [InlineData("dans mes documents, sous-dossier ..")]
+    [InlineData("dans mes documents, sous-dossier .cache")]
+    public void SousDossierInvalide_RetombeSurLeDossierParDefaut(string phrase)
+    {
+        Assert.Equal(Path.Combine(Documents, "xd", "notes"), Extraire(Lecture(), phrase));
+    }
+
+    [Theory]
     [InlineData("je ne sais pas trop")]
     [InlineData("dans le dossier notes")]
     [InlineData("et/ou ailleurs")]

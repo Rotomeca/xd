@@ -19,6 +19,10 @@ public sealed class OutilConfigurerNotes : IOutil
     private const string ParametreElement = "element";
     private const int ProjetsCitesMax = 5;
 
+    // Une note demandée avant la configuration attend encore : le modèle doit la reprendre (nouvelle décision de sa part,
+    // pas un nouvel essai automatique du code).
+    private const string SuiteNote = "Si l'utilisateur avait demandé une note qui n'a pas encore été écrite, appelle maintenant noter_idee avec ce texte.";
+
     private static readonly IReadOnlyDictionary<string, ElementNotes> Elements = new Dictionary<string, ElementNotes>(StringComparer.Ordinal)
     {
         ["dossier_notes"] = ElementNotes.DossierNotes,
@@ -122,7 +126,7 @@ public sealed class OutilConfigurerNotes : IOutil
                 return Task.FromResult(Result.Fail<string>(new Error($"création du dossier « {dossier} » impossible : {ex.Message}", ErrorType.Unexpected, exception: ex)));
             }
 
-            return Task.FromResult(Enregistrer(stockage, c => c with { DossierNotes = dossier }, $"Dossier de notes enregistré : {dossier}."));
+            return Task.FromResult(Enregistrer(stockage, c => c with { DossierNotes = dossier }, $"Dossier de notes enregistré : {dossier}. {SuiteNote}"));
         }
     }
 
@@ -137,7 +141,7 @@ public sealed class OutilConfigurerNotes : IOutil
             return Task.FromResult(Enregistrer(
                 stockage,
                 c => c.DossiersProjets.Contains(dossier, comparaison) ? c : c with { DossiersProjets = [.. c.DossiersProjets, dossier] },
-                $"Dossier de projets ajouté : {dossier} ({Decrire(projets)})."));
+                $"Dossier de projets ajouté : {dossier} ({Decrire(projets)}). {SuiteNote}"));
         }
 
         private static string Decrire(IReadOnlyList<string> projets) => projets.Count switch
