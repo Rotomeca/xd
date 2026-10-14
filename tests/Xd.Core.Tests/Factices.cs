@@ -2,6 +2,7 @@ using System.Text.Json;
 using Rotomeca.Rop;
 using Rotomeca.Rop.Interfaces;
 using Xd.Core.Audit;
+using Xd.Core.Boucle;
 using Xd.Core.Outils;
 using Xd.Core.Permissions;
 
@@ -106,4 +107,34 @@ internal sealed class JournalMemoire : IJournalAudit
 internal sealed class HorlogeFixe(DateTimeOffset maintenant) : TimeProvider
 {
     public override DateTimeOffset GetUtcNow() => maintenant;
+}
+
+internal sealed class ModeleFactice : IModele
+{
+    private readonly Func<int, CancellationToken, Task<IResult<ReponseModele>>> _repondre;
+
+    public ModeleFactice(Func<int, CancellationToken, Task<IResult<ReponseModele>>> repondre)
+    {
+        _repondre = repondre;
+    }
+
+    /// <summary>Historiques reçus, un par envoi.</summary>
+    public List<IReadOnlyList<Message>> Envois { get; } = [];
+
+    /// <summary>Modèle qui renvoie les réponses dans l'ordre, une par envoi.</summary>
+    public static ModeleFactice Script(params ReponseModele[] reponses) =>
+        new((numero, _) => Task.FromResult(Result.Ok(reponses[numero])));
+
+    public static ReponseModele Texte(string texte) => new([new BlocTexte(texte)], RaisonArret.Fin);
+
+    public static ReponseModele Appels(params BlocAppelOutil[] appels) => new(appels, RaisonArret.AppelOutils);
+
+    public static BlocAppelOutil Appel(string id, string nomOutil) =>
+        new(id, nomOutil, JsonDocument.Parse("{}").RootElement);
+
+    public Task<IResult<ReponseModele>> EnvoyerAsync(IReadOnlyList<Message> historique, IReadOnlyList<DefinitionOutil> outils, CancellationToken annulation)
+    {
+        Envois.Add(historique);
+        return _repondre(Envois.Count - 1, annulation);
+    }
 }

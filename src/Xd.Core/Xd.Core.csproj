@@ -5,4 +5,8 @@
     <PackageReference Include="Rotomeca.Rop" Version="1.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Xd.Core.Tests" />
+  </ItemGroup>
+
 </Project>

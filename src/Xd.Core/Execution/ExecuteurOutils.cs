@@ -26,17 +26,24 @@ public sealed class ExecuteurOutils
     public ExecuteurOutils(IEnumerable<IOutil> outils, IConfirmateur confirmateur, IJournalAudit journal, TimeProvider horloge)
     {
         var parNom = new Dictionary<string, IOutil>(StringComparer.Ordinal);
+        var definitions = new List<DefinitionOutil>();
         foreach (IOutil outil in outils)
         {
             if (!parNom.TryAdd(outil.Nom, outil))
                 throw new ArgumentException($"Deux outils portent le nom « {outil.Nom} ».", nameof(outils));
+
+            definitions.Add(new DefinitionOutil(outil.Nom, outil.Description, outil.SchemaParametres));
         }
 
         _outils = parNom;
+        Definitions = definitions;
         _confirmateur = confirmateur;
         _journal = journal;
         _horloge = horloge;
     }
+
+    /// <summary>Outils exposés à Claude : exactement ceux que cet exécuteur sait traiter.</summary>
+    public IReadOnlyList<DefinitionOutil> Definitions { get; }
 
     /// <summary>Traite une demande d'outil de bout en bout.</summary>
     /// <param name="appel">Demande émise par Claude.</param>

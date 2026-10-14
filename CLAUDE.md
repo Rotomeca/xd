@@ -16,7 +16,7 @@ Plateforme cible : **Windows et Linux**. Tout code spécifique à l'OS (icône d
 
 Solution `Xd.slnx` (format XML, SDK .NET 10). Paramètres communs (`net10.0`, `Nullable`, `ImplicitUsings`, `TreatWarningsAsErrors`) dans `Directory.Build.props` : ne pas les répéter dans les `.csproj`.
 
-Existant : `src/Xd.Core` (abstractions d'outils, couche de permission `ExecuteurOutils`, journal d'audit JSONL) et `tests/Xd.Core.Tests` (xUnit). Pas encore de point d'entrée exécutable : `Xd.Cli` arrivera avec la boucle agentique.
+Existant : `src/Xd.Core` (abstractions d'outils, couche de permission `ExecuteurOutils`, journal d'audit JSONL, boucle agentique `BoucleAgentique` + historique glissant), `src/Xd.Claude` (adaptateur `IModele` sur le SDK `Anthropic`) et leurs tests xUnit. Pas encore d'outil concret ni de point d'entrée exécutable : `Xd.Cli` arrivera après les outils.
 
 ```sh
 dotnet build Xd.slnx
@@ -61,7 +61,7 @@ Trois blocs, découplés par interfaces :
 
 Une **machine à états** centrale est la source de vérité : `Veille` au-dessus de tout, puis à l'éveil `Repos → Ecoute → Reflexion → Parle → Erreur`. L'icône, le compagnon et l'audio s'y abonnent.
 
-Structure de solution : `src/Xd.Core` (boucle, permissions, états, abstractions), `src/Xd.Tools` (implémentations des outils), `src/Xd.Host` (icône de notification, cycle de vie des processus enfants), `src/Xd.Cli` (entrée console de l'étape 1), `tests/Xd.*.Tests`. Créer chaque projet seulement quand une tranche en a besoin.
+Structure de solution : `src/Xd.Core` (boucle, permissions, états, abstractions ; aucune dépendance au SDK), `src/Xd.Claude` (seul projet qui référence le SDK `Anthropic` : implémente `IModele`), `src/Xd.Tools` (implémentations des outils), `src/Xd.Host` (icône de notification, cycle de vie des processus enfants), `src/Xd.Cli` (entrée console de l'étape 1), `tests/Xd.*.Tests`. Créer chaque projet seulement quand une tranche en a besoin.
 
 Contrat d'un outil (`Xd.Core.Outils`) : `IOutil.Preparer(JsonElement)` valide les paramètres et renvoie une `IActionPreparee` (ou une erreur Rop) **sans rien exécuter** ; l'action porte une `Reformulation` construite à partir des paramètres validés (c'est la question de confirmation) et `ExecuterAsync`. `ExecuteurOutils` est le seul à enchaîner validation → confirmation → audit → exécution ; il écrit le journal avec `CancellationToken.None` (un refus pour cause de veille doit être journalisé) et n'exécute rien si une entrée d'audit ne peut pas être écrite avant l'exécution.
 
@@ -100,7 +100,8 @@ Deux niveaux : comportements locaux du compagnon sans appel à Claude (animation
 
 - SDK : package NuGet **`Anthropic`** (SDK C# officiel, v10+). **Ne pas** utiliser `Anthropic.SDK` ni `tryAGI.Anthropic` (clients non officiels).
 - Modèle par défaut : `claude-haiku-5-5` (latence prioritaire pour un usage vocal). Configurable.
-- Historique : glissant, limité aux derniers échanges, pas toute la session.
+- Historique : glissant, limité aux derniers échanges, pas toute la session. Coupé uniquement entre deux tours complets (jamais entre un `tool_use` et son `tool_result`).
+- Réflexion (`thinking`) désactivée avec un effort `low` : latence, et un historique glissant modifie le début de la conversation, ce que l'API refuse quand des blocs de réflexion sont rejoués. La réactiver impose un historique en ajout seul.
 - Prompt système : court ; l'assistant parle français, répond en une ou deux phrases, **sans markdown** (le texte sera lu par un TTS), annonce ce qu'il va faire avant une action à confirmer.
 
 ## Conventions C#
