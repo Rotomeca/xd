@@ -16,12 +16,13 @@ Plateforme cible : **Windows et Linux**. Tout code spécifique à l'OS (icône d
 
 Solution `Xd.slnx` (format XML, SDK .NET 10). Paramètres communs (`net10.0`, `Nullable`, `ImplicitUsings`, `TreatWarningsAsErrors`) dans `Directory.Build.props` : ne pas les répéter dans les `.csproj`.
 
-Existant : `src/Xd.Core` (abstractions d'outils, couche de permission `ExecuteurOutils`, journal d'audit JSONL, boucle agentique `BoucleAgentique` + historique glissant), `src/Xd.Claude` (adaptateur `IModele` sur le SDK `Anthropic`, **mis de côté** : conservé et testé, mais non utilisé) et leurs tests xUnit. Pas encore d'outil concret ni de point d'entrée exécutable. Prochaines tranches : `Xd.Local` (adaptateur `IModele` vers `llama-server`), `Xd.Cli` (console pour parler à la boucle), les trois outils, puis le lancement automatique de `llama-server` par paliers.
+Existant : `src/Xd.Core` (abstractions d'outils, couche de permission `ExecuteurOutils`, journal d'audit JSONL, boucle agentique `BoucleAgentique` + historique glissant), `src/Xd.Local` (adaptateur `IModele` vers `llama-server`, lancement de `llama-server` en processus enfant, configuration `llm.json`), `src/Xd.Cli` (exécutable `xd` : discussion en console), `src/Xd.Claude` (adaptateur `IModele` sur le SDK `Anthropic`, **mis de côté** : conservé et testé, mais non utilisé) et leurs tests xUnit. Pas encore d'outil concret. Prochaines tranches : les trois outils, puis le choix automatique du palier à l'éveil.
 
 ```sh
 dotnet build Xd.slnx
 dotnet test Xd.slnx
 dotnet test Xd.slnx --filter "FullyQualifiedName~ExecuteurOutilsTests"   # une classe ou un test précis
+dotnet run --project src/Xd.Cli                                            # discuter (LLM configuré requis)
 ```
 
 ## Feuille de route
@@ -114,7 +115,7 @@ Deux niveaux : comportements locaux du compagnon sans appel au LLM (animations d
 Utiliser l'écosystème **Rotomeca** (NuGet, espace de noms `Rotomeca.*`) plutôt que des équivalents maison ou tiers :
 
 - `Rotomeca.Core` : méta-package, à référencer par défaut. **Attention** : il n'embarque que `Core.Collections` et `Core.Optionals` ; `Rotomeca.Rop` et `Rotomeca.Utils` doivent être référencés séparément.
-- `Rotomeca.Rop` : gestion d'erreurs orientée rail (Railway Oriented Programming). Le générateur `[Risky]` décrit dans son README **n'est pas livré dans le package 1.0.0** : convertir les exceptions à la main (`try`/`catch` à la frontière, `Result.Try`, `ResultAsync.TryAsync`). Une opération sans valeur renvoie `IResult<bool>` (`true` en succès), comme `Result.Try(Action)`. **C'est le mécanisme d'erreur du projet** : les outils, la couche de permission et la boucle renvoient des résultats Rop plutôt que de lever des exceptions. Les exceptions des bibliothèques externes (SDK, `Process`, I/O) sont converties en résultats à la frontière.
+- `Rotomeca.Rop` : gestion d'erreurs orientée rail (Railway Oriented Programming). Le générateur `[Risky]` décrit dans son README **n'est pas livré dans le package 1.0.0** : convertir les exceptions à la main (`try`/`catch` à la frontière, `Result.Try`, `ResultAsync.TryAsync`). Une opération sans valeur renvoie `IResult<bool>` (`true` en succès). **Attention** : `Result.Try(Action)` renvoie un `IEmptyResult` et `Result.Try<T>(Func<T>)` un `IResult<T, IError>`, ni l'un ni l'autre convertible en `IResult<T>` : à la frontière, préférer un `try`/`catch` filtré qui renvoie `Result.Ok`/`Result.Fail<T>`. **C'est le mécanisme d'erreur du projet** : les outils, la couche de permission et la boucle renvoient des résultats Rop plutôt que de lever des exceptions. Les exceptions des bibliothèques externes (SDK, `Process`, I/O) sont converties en résultats à la frontière.
 - `Rotomeca.Core.Optionals` : `MayBe<T>` pour exprimer l'absence de valeur, plutôt que `null`.
 - `Rotomeca.Core.Collections` : `RArray<T>` quand c'est pertinent.
 - `Rotomeca.Utils` : utilitaires divers, à vérifier avant d'écrire un helper.

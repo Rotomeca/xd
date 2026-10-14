@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Xd.Claude/Xd.Claude.csproj" />
+    <Project Path="src/Xd.Cli/Xd.Cli.csproj" />
     <Project Path="src/Xd.Core/Xd.Core.csproj" />
     <Project Path="src/Xd.Local/Xd.Local.csproj" />
   </Folder>

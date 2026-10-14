@@ -1,0 +1,8 @@
+{
+  "cheminServeur": "C:\Users\moi\AppData\Local\xd\llm\llama.cpp\b11429-vulkan\llama-server.exe",
+  "cheminModele": "C:\Users\moi\AppData\Local\xd\llm\modeles\Qwen3-8B-Q4_K_M.gguf",
+  "palier": "standard",
+  "couchesGpu": "all",
+  "tailleContexte": 8192,
+  "port": 8080
+}
