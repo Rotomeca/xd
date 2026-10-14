@@ -2,9 +2,11 @@
   <Folder Name="/src/">
     <Project Path="src/Xd.Claude/Xd.Claude.csproj" />
     <Project Path="src/Xd.Core/Xd.Core.csproj" />
+    <Project Path="src/Xd.Local/Xd.Local.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Xd.Claude.Tests/Xd.Claude.Tests.csproj" />
     <Project Path="tests/Xd.Core.Tests/Xd.Core.Tests.csproj" />
+    <Project Path="tests/Xd.Local.Tests/Xd.Local.Tests.csproj" />
   </Folder>
 </Solution>
