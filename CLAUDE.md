@@ -16,13 +16,14 @@ Plateforme cible : **Windows et Linux**. Tout code spécifique à l'OS (icône d
 
 Solution `Xd.slnx` (format XML, SDK .NET 10). Paramètres communs (`net10.0`, `Nullable`, `ImplicitUsings`, `TreatWarningsAsErrors`) dans `Directory.Build.props` : ne pas les répéter dans les `.csproj`.
 
-Existant : `src/Xd.Core` (abstractions d'outils, couche de permission `ExecuteurOutils`, journal d'audit JSONL, boucle agentique `BoucleAgentique` + historique glissant), `src/Xd.Local` (adaptateur `IModele` vers `llama-server`, lancement de `llama-server` en processus enfant, configuration `llm.json`), `src/Xd.Cli` (exécutable `xd` : discussion en console), `src/Xd.Claude` (adaptateur `IModele` sur le SDK `Anthropic`, **mis de côté** : conservé et testé, mais non utilisé) et leurs tests xUnit. Pas encore d'outil concret. Prochaines tranches : les trois outils, puis le choix automatique du palier à l'éveil.
+Existant : `src/Xd.Core` (abstractions d'outils, couche de permission `ExecuteurOutils`, journal d'audit JSONL, boucle agentique `BoucleAgentique` + historique glissant), `src/Xd.Local` (adaptateur `IModele` vers `llama-server`, lancement de `llama-server` en processus enfant, configuration `llm.json`, installation `xd setup llm`), `src/Xd.Cli` (exécutable `xd` : discussion en console, `xd setup llm`), `src/Xd.Claude` (adaptateur `IModele` sur le SDK `Anthropic`, **mis de côté** : conservé et testé, mais non utilisé) et leurs tests xUnit. Pas encore d'outil concret. Prochaines tranches : les trois outils, puis le choix automatique du palier à l'éveil.
 
 ```sh
 dotnet build Xd.slnx
 dotnet test Xd.slnx
 dotnet test Xd.slnx --filter "FullyQualifiedName~ExecuteurOutilsTests"   # une classe ou un test précis
 dotnet run --project src/Xd.Cli                                            # discuter (LLM configuré requis)
+dotnet run --project src/Xd.Cli -- setup llm                               # installer le LLM local (télécharge après confirmation)
 ```
 
 ## Feuille de route
@@ -101,8 +102,9 @@ Deux niveaux : comportements locaux du compagnon sans appel au LLM (animations d
 
 - Serveur : **`llama-server`** (llama.cpp), via son API HTTP compatible OpenAI (`/v1/chat/completions`, appels d'outils natifs). Pas d'Ollama : son service permanent va contre l'invariant 11. Pas de client NuGet : `HttpClient` + `System.Text.Json`.
 - `llama-server` est un **processus enfant** : lancé à l'éveil, arrêté à la veille (invariant 11). En attendant `Xd.Host`, il est lancé à la main et `Xd.Local` ne connaît que son adresse.
-- **Paliers de modèles** (à venir) : la configuration décrit des paliers, du plus gros au plus léger (ex. *confort* ~14 milliards de paramètres sur GPU, *standard* ~8 milliards sur GPU, *léger* ~3–4 milliards sur CPU). À l'éveil, l'orchestrateur mesure la mémoire vidéo **libre** (implémentation par OS derrière une interface ; NVIDIA : `nvidia-smi` lancé sans shell), garde une marge pour la voix, et lance le plus gros palier qui tient ; sans GPU détecté, palier léger. Machine de développement : RTX 4070 (12 Go), 32 Go de RAM.
-- **Fichiers de modèle** (GGUF) : chemins issus de la configuration hors dépôt (invariant 5). Téléchargés par l'utilisateur ; Xd ne télécharge jamais de modèle.
+- **Paliers de modèles** : définis dans `CatalogueLlm` (Qwen3 Q4_K_M) : *confort* (14B, 13 Go de mémoire vidéo libre requis, marge voix comprise), *standard* (8B, 9 Go), *léger* (4B, processeur). `xd setup llm` mesure la mémoire vidéo **libre** (`IMesureMemoireVideo` ; NVIDIA : `nvidia-smi` lancé sans shell), choisit le plus gros palier qui tient (ou celui imposé par `--palier`) et l'écrit dans `llm.json` ; sans carte NVIDIA détectée, palier léger. llama.cpp est installé en variante Vulkan (Windows et Linux) ou CPU. À venir : refaire ce choix à chaque éveil. Machine de développement : RTX 4070 (12 Go), 32 Go de RAM.
+- **Téléchargements** : uniquement par `xd setup llm`, uniquement depuis le catalogue épinglé `CatalogueLlm` (HTTPS, version ou commit précis, jamais « latest » ni « main », taille et SHA-256 attendus). Annonce des fichiers, de leur source et de leur taille puis **confirmation explicite** avant tout téléchargement ; vérification taille + SHA-256 avant de placer un fichier ; extraction refusant toute entrée ou lien hors du dossier cible. Mettre à jour une version = mettre à jour adresses **et** empreintes dans `CatalogueLlm`, relues en revue. Rien d'autre dans Xd ne télécharge quoi que ce soit.
+- **Emplacements** : `llm.json` dans le dossier de configuration utilisateur (`ApplicationData`/`xd`) ; exécutables et modèles dans `LocalApplicationData`/`xd`/`llm` ; chemins issus de cette configuration (invariant 5).
 - Choix des modèles (familles Qwen, Mistral… pour le français et les appels d'outils) : sur un **jeu d'évaluation** de phrases vocales réelles avec l'outil attendu, pas à l'intuition.
 - Historique : glissant, limité aux derniers échanges, pas toute la session. Coupé uniquement entre deux tours complets (jamais entre un `tool_use` et son `tool_result`). Garder le début de la conversation stable (prompt système figé, outils dans un ordre fixe, pas d'heure dans le prompt système) : `llama-server` réutilise le préfixe déjà calculé, c'est de la latence gagnée.
 - Prompt système : court ; l'assistant parle français, répond en une ou deux phrases, **sans markdown** (le texte sera lu par un TTS), annonce ce qu'il va faire avant une action à confirmer.
