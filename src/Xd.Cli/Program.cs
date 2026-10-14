@@ -1,8 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
 using Xd.Cli;
+using Xd.Core.Outils;
 using Xd.Core.Permissions;
 using Xd.Local.Installation;
 using Xd.Local.Serveur;
+using Xd.Tools.EtatMachine;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 Console.InputEncoding = System.Text.Encoding.UTF8;
@@ -13,6 +15,11 @@ await using ServiceProvider services = new ServiceCollection()
     .AddSingleton(_ => new HttpClient { Timeout = TimeSpan.FromMinutes(3) })
     .AddSingleton<IConfirmateur, ConfirmateurConsole>()
     .AddSingleton<CommandeDiscussion>()
+    .AddSingleton<IMesuresMachine>(_ => OperatingSystem.IsWindows() ? new MesuresWindows()
+        : OperatingSystem.IsLinux() ? new MesuresLinux()
+        : throw new PlatformNotSupportedException("Xd fonctionne sous Windows et Linux."))
+    .AddSingleton<ISourceConteneurs, ConteneursDocker>()
+    .AddSingleton<IOutil, OutilEtatMachine>()
     .AddSingleton<IMesureMemoireVideo, MesureNvidiaSmi>()
     .AddSingleton<IInteractionInstallation, InteractionConsole>()
     // Téléchargements de plusieurs gigaoctets : pas de délai global, Ctrl+C pour interrompre.

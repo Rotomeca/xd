@@ -16,7 +16,7 @@ Plateforme cible : **Windows et Linux**. Tout code spécifique à l'OS (icône d
 
 Solution `Xd.slnx` (format XML, SDK .NET 10). Paramètres communs (`net10.0`, `Nullable`, `ImplicitUsings`, `TreatWarningsAsErrors`) dans `Directory.Build.props` : ne pas les répéter dans les `.csproj`.
 
-Existant : `src/Xd.Core` (abstractions d'outils, couche de permission `ExecuteurOutils`, journal d'audit JSONL, boucle agentique `BoucleAgentique` + historique glissant), `src/Xd.Local` (adaptateur `IModele` vers `llama-server`, lancement de `llama-server` en processus enfant, configuration `llm.json`, installation `xd setup llm`), `src/Xd.Cli` (exécutable `xd` : discussion en console, `xd setup llm`), `src/Xd.Claude` (adaptateur `IModele` sur le SDK `Anthropic`, **mis de côté** : conservé et testé, mais non utilisé) et leurs tests xUnit. Pas encore d'outil concret. Prochaines tranches : les trois outils, puis le choix automatique du palier à l'éveil.
+Existant : `src/Xd.Core` (abstractions d'outils, couche de permission `ExecuteurOutils`, journal d'audit JSONL, boucle agentique `BoucleAgentique` + historique glissant), `src/Xd.Local` (adaptateur `IModele` vers `llama-server`, lancement de `llama-server` en processus enfant, configuration `llm.json`, installation `xd setup llm`), `src/Xd.Tools` (outil `etat_machine` : mesures Windows/Linux derrière `IMesuresMachine`, conteneurs via l'API Docker en lecture), `src/Xd.Cli` (exécutable `xd` : discussion en console, `xd setup llm`), `src/Xd.Claude` (adaptateur `IModele` sur le SDK `Anthropic`, **mis de côté** : conservé et testé, mais non utilisé) et leurs tests xUnit. Prochaines tranches : `noter_idee`, `lancer_mode`, puis veille/éveil et le choix automatique du palier à l'éveil.
 
 ```sh
 dotnet build Xd.slnx

@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Xd.Local\Xd.Local.csproj" />
+    <ProjectReference Include="..\Xd.Tools\Xd.Tools.csproj" />
   </ItemGroup>
 
   <ItemGroup>
