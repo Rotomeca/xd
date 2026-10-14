@@ -45,6 +45,7 @@ public sealed class ModeleLocalTests
         JsonElement messages = serveur.Corps.GetProperty("messages");
         Assert.Equal(["system", "user", "assistant", "tool"], messages.EnumerateArray().Select(m => m.GetProperty("role").GetString()));
         Assert.Equal("Sois bref.", messages[0].GetProperty("content").GetString());
+        Assert.False(serveur.Corps.GetProperty("chat_template_kwargs").GetProperty("enable_thinking").GetBoolean());
 
         JsonElement appel = messages[2].GetProperty("tool_calls")[0];
         Assert.Equal("a1", appel.GetProperty("id").GetString());
@@ -119,10 +120,13 @@ public sealed class ModeleLocalTests
         Assert.Equal(attendue, reponse.Arret);
     }
 
-    [Fact]
-    public async Task ReflexionDansLeTexte_EstRetiree()
+    [Theory]
+    [InlineData(@"<think>l'utilisateur salue</think>\nBonjour !")]
+    [InlineData(@"Okay, the user greets me. Keep it short.\n</think>\n\nBonjour !")]
+    [InlineData("Bonjour !")]
+    public async Task ReflexionDansLeTexte_EstRetiree(string contenu)
     {
-        var (modele, _) = Creer(HttpStatusCode.OK, Reponse("""{ "role": "assistant", "content": "<think>l'utilisateur salue</think>\nBonjour !" }""", "stop"));
+        var (modele, _) = Creer(HttpStatusCode.OK, Reponse($$"""{ "role": "assistant", "content": "{{contenu}}" }""", "stop"));
 
         ReponseModele reponse = Valeur(await Envoyer(modele, new MessageUtilisateur("salut")));
 

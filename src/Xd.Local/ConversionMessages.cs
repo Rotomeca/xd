@@ -27,7 +27,13 @@ internal static class ConversionMessages
                 messages.Add(converti);
         }
 
-        var requete = new JsonObject { ["messages"] = messages, ["max_tokens"] = maxJetons };
+        var requete = new JsonObject
+        {
+            ["messages"] = messages,
+            ["max_tokens"] = maxJetons,
+            // Pas de raisonnement (latence vocale) ; ignoré par les gabarits qui ne le connaissent pas.
+            ["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false },
+        };
         if (outils.Count > 0)
             requete["tools"] = new JsonArray([.. outils.Select(VersOutil)]);
 
@@ -154,5 +160,14 @@ internal static class ConversionMessages
     };
 
     /// <summary>Retire un raisonnement <c>&lt;think&gt;…&lt;/think&gt;</c> laissé dans le texte par certains modèles.</summary>
-    private static string SansReflexion(string texte) => BaliseReflexion.Replace(texte, string.Empty).Trim();
+    /// <remarks>
+    /// Le gabarit peut ouvrir lui-même la balise <c>&lt;think&gt;</c> : la réponse ne contient alors que la fin du raisonnement
+    /// et <c>&lt;/think&gt;</c>. Tout ce qui précède la dernière balise fermante est donc retiré.
+    /// </remarks>
+    private static string SansReflexion(string texte)
+    {
+        int fin = texte.LastIndexOf("</think>", StringComparison.Ordinal);
+        string reponse = fin >= 0 ? texte[(fin + "</think>".Length)..] : texte;
+        return BaliseReflexion.Replace(reponse, string.Empty).Trim();
+    }
 }
